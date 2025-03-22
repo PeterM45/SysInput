@@ -1,0 +1,33 @@
+# Zig build artifacts
+zig-cache/
+zig-out/
+build/
+build-*/
+
+# Executables
+*.exe
+*.out
+*.app
+SysInput
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+deps/
+
+# Log files
+*.log
