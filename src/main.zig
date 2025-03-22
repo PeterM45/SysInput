@@ -2,6 +2,7 @@ const std = @import("std");
 const win32 = @import("win32/hook.zig");
 const buffer = @import("buffer/buffer.zig");
 const detection = @import("detection/text_field.zig");
+const spellcheck = @import("spellcheck/spellchecker.zig");
 
 /// General Purpose Allocator for dynamic memory
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -12,6 +13,12 @@ var buffer_manager: buffer.BufferManager = undefined;
 /// Global text field manager for detecting active text fields
 var text_field_manager: detection.TextFieldManager = undefined;
 
+/// Global spellchecker
+var spell_checker: spellcheck.SpellChecker = undefined;
+
+/// List for storing word suggestions
+var suggestions: std.ArrayList([]const u8) = undefined;
+
 /// Window timer ID for periodic text field detection
 const TEXT_FIELD_DETECTION_TIMER = 1;
 
@@ -20,52 +27,66 @@ const DETECTION_INTERVAL_MS = 500;
 
 /// Low-level keyboard hook callback function
 fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) callconv(.C) win32.LRESULT {
+    // First, immediately check if we should pass this to the next hook
+    if (nCode < 0) {
+        return win32.CallNextHookEx(null, nCode, wParam, lParam);
+    }
+
     if (nCode == win32.HC_ACTION) {
         const kbd = @as(*win32.KBDLLHOOKSTRUCT, @ptrFromInt(@as(usize, @bitCast(lParam))));
 
+        // Only process keydown events
         if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
-            std.debug.print("Key down: 0x{X}\n", .{kbd.vkCode});
+            // Limit processing to printable characters and specific control keys
+            const is_control_key =
+                kbd.vkCode == win32.VK_ESCAPE or
+                kbd.vkCode == win32.VK_BACK or
+                kbd.vkCode == win32.VK_DELETE or
+                kbd.vkCode == win32.VK_RETURN;
 
-            // Exit application on ESC key
-            if (kbd.vkCode == win32.VK_ESCAPE) {
-                std.debug.print("ESC pressed - exit\n", .{});
-                std.process.exit(0);
+            const is_printable = kbd.vkCode >= 0x20 and kbd.vkCode <= 0x7E;
+
+            if (is_control_key or is_printable) {
+                std.debug.print("Key down: 0x{X}\n", .{kbd.vkCode});
+
+                // Exit application on ESC key
+                if (kbd.vkCode == win32.VK_ESCAPE) {
+                    std.debug.print("ESC pressed - exit\n", .{});
+                    std.process.exit(0);
+                }
+
+                // Special key handling for text editing
+                if (kbd.vkCode == win32.VK_BACK) {
+                    // Backspace key
+                    buffer_manager.processBackspace() catch |err| {
+                        std.debug.print("Backspace error: {}\n", .{err});
+                    };
+                    syncTextFieldWithBuffer();
+                } else if (kbd.vkCode == win32.VK_DELETE) {
+                    // Delete key
+                    buffer_manager.processDelete() catch |err| {
+                        std.debug.print("Delete error: {}\n", .{err});
+                    };
+                    syncTextFieldWithBuffer();
+                } else if (kbd.vkCode == win32.VK_RETURN) {
+                    // Enter/Return key
+                    buffer_manager.processKeyPress('\n', true) catch |err| {
+                        std.debug.print("Return key error: {}\n", .{err});
+                    };
+                    syncTextFieldWithBuffer();
+                } else if (is_printable) {
+                    // ASCII character input
+                    const char: u8 = @truncate(kbd.vkCode);
+
+                    buffer_manager.processKeyPress(char, true) catch |err| {
+                        std.debug.print("Key processing error: {}\n", .{err});
+                    };
+                    syncTextFieldWithBuffer();
+                }
+
+                // Debug: print current buffer state
+                printBufferState();
             }
-
-            // Special key handling for text editing
-            if (kbd.vkCode == win32.VK_BACK) {
-                // Backspace key
-                buffer_manager.processBackspace() catch |err| {
-                    std.debug.print("Backspace error: {}\n", .{err});
-                };
-                syncTextFieldWithBuffer();
-            } else if (kbd.vkCode == win32.VK_DELETE) {
-                // Delete key
-                buffer_manager.processDelete() catch |err| {
-                    std.debug.print("Delete error: {}\n", .{err});
-                };
-                syncTextFieldWithBuffer();
-            } else if (kbd.vkCode == win32.VK_RETURN) {
-                // Enter/Return key
-                buffer_manager.processKeyPress('\n', true) catch |err| {
-                    std.debug.print("Return key error: {}\n", .{err});
-                };
-                syncTextFieldWithBuffer();
-            } else if (kbd.vkCode == win32.VK_TAB) {
-                // Tab key might indicate focus change - detect text field
-                detectActiveTextField();
-            } else if (kbd.vkCode >= 0x20 and kbd.vkCode <= 0x7E) {
-                // ASCII character input
-                const char: u8 = @truncate(kbd.vkCode);
-
-                buffer_manager.processKeyPress(char, true) catch |err| {
-                    std.debug.print("Key processing error: {}\n", .{err});
-                };
-                syncTextFieldWithBuffer();
-            }
-
-            // Debug: print current buffer state
-            printBufferState();
         }
     }
 
@@ -83,6 +104,42 @@ fn printBufferState() void {
         return;
     };
     std.debug.print("Current word: \"{s}\"\n", .{word});
+
+    // Only perform spell checking if the word is at least 2 characters
+    if (word.len >= 2) {
+        if (!spell_checker.isCorrect(word)) {
+            std.debug.print("Spelling error detected: \"{s}\"\n", .{word});
+
+            // Limit suggestion generation to avoid excessive CPU usage
+            const should_generate_suggestions = word.len < 15; // Skip very long words
+
+            if (should_generate_suggestions) {
+                // Clear existing suggestions
+                for (suggestions.items) |item| {
+                    gpa.allocator().free(item);
+                }
+                suggestions.clearRetainingCapacity();
+
+                // Get spelling suggestions
+                spell_checker.getSuggestions(word, &suggestions) catch |err| {
+                    std.debug.print("Error getting suggestions: {}\n", .{err});
+                    return;
+                };
+
+                // Print suggestions
+                if (suggestions.items.len > 0) {
+                    std.debug.print("Suggestions: ", .{});
+                    for (suggestions.items, 0..) |suggestion, i| {
+                        if (i > 0) std.debug.print(", ", .{});
+                        std.debug.print("\"{s}\"", .{suggestion});
+                    }
+                    std.debug.print("\n", .{});
+                } else {
+                    std.debug.print("No suggestions available\n", .{});
+                }
+            }
+        }
+    }
 }
 
 /// Detect the active text field and sync with our buffer
@@ -165,6 +222,19 @@ pub fn main() !void {
 
     // Initialize the text field manager
     text_field_manager = detection.TextFieldManager.init(allocator);
+
+    // Initialize the spellchecker
+    spell_checker = try spellcheck.SpellChecker.init(allocator);
+    defer spell_checker.deinit();
+
+    // Initialize suggestions list
+    suggestions = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (suggestions.items) |item| {
+            allocator.free(item);
+        }
+        suggestions.deinit();
+    }
 
     std.debug.print("Starting SysInput...\n", .{});
 
