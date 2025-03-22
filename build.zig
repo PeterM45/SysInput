@@ -11,9 +11,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // Link with Windows user32 library (needed for keyboard hooks)
+    // Link with Windows user32 library (needed for keyboard hooks and window functions)
     if (target.result.os.tag == .windows) {
         exe.linkSystemLibrary("user32");
+        exe.linkLibC(); // Link C library for Windows API compatibility
     }
 
     // Install the executable

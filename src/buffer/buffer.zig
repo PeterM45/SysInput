@@ -227,6 +227,12 @@ pub const BufferManager = struct {
         }
     }
 
+    /// Insert a string into the buffer
+    pub fn insertString(self: *BufferManager, str: []const u8) !void {
+        try self.active_buffer.insertString(str);
+        self.changed = true;
+    }
+
     /// Process backspace key
     pub fn processBackspace(self: *BufferManager) !void {
         try self.active_buffer.deleteCharBackward();
