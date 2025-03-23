@@ -1,5 +1,7 @@
 const std = @import("std");
-const common = @import("../win32/common.zig");
+const sysinput = @import("../sysinput.zig");
+
+const api = sysinput.win32.api;
 
 // Typical text field window class names
 const TEXT_FIELD_CLASS_NAMES = [_][]const u8{
@@ -13,12 +15,12 @@ const TEXT_FIELD_CLASS_NAMES = [_][]const u8{
 };
 
 // Windows API function declarations for text field detection
-pub extern "user32" fn GetForegroundWindow() callconv(.C) ?common.HWND;
-pub extern "user32" fn GetClassNameA(hWnd: common.HWND, lpClassName: [*:0]u8, nMaxCount: c_int) callconv(.C) c_int;
-pub extern "user32" fn GetFocus() callconv(.C) ?common.HWND;
-pub extern "user32" fn GetWindowThreadProcessId(hWnd: common.HWND, lpdwProcessId: ?*common.DWORD) callconv(.C) common.DWORD;
-pub extern "user32" fn SendMessageA(hWnd: common.HWND, Msg: common.UINT, wParam: common.WPARAM, lParam: common.LPARAM) callconv(.C) common.LRESULT;
-pub extern "user32" fn PostMessageA(hWnd: common.HWND, Msg: common.UINT, wParam: common.WPARAM, lParam: common.LPARAM) callconv(.C) common.BOOL;
+pub extern "user32" fn GetForegroundWindow() callconv(.C) ?api.HWND;
+pub extern "user32" fn GetClassNameA(hWnd: api.HWND, lpClassName: [*:0]u8, nMaxCount: c_int) callconv(.C) c_int;
+pub extern "user32" fn GetFocus() callconv(.C) ?api.HWND;
+pub extern "user32" fn GetWindowThreadProcessId(hWnd: api.HWND, lpdwProcessId: ?*api.DWORD) callconv(.C) api.DWORD;
+pub extern "user32" fn SendMessageA(hWnd: api.HWND, Msg: api.UINT, wParam: api.WPARAM, lParam: api.LPARAM) callconv(.C) api.LRESULT;
+pub extern "user32" fn PostMessageA(hWnd: api.HWND, Msg: api.UINT, wParam: api.WPARAM, lParam: api.LPARAM) callconv(.C) api.BOOL;
 
 // Error types for text field detection
 pub const TextFieldError = error{
@@ -31,7 +33,7 @@ pub const TextFieldError = error{
 /// Structure to hold information about a detected text field
 pub const TextField = struct {
     /// Window handle for the text field
-    handle: common.HWND,
+    handle: api.HWND,
     /// Window class name (Edit, RichEdit, etc.)
     class_name: [64]u8,
     /// Current selection start position
@@ -41,9 +43,9 @@ pub const TextField = struct {
     /// Whether this is a valid text field
     is_valid: bool,
     /// Process ID of the owning application
-    process_id: common.DWORD,
+    process_id: api.DWORD,
     /// Thread ID of the owning thread
-    thread_id: common.DWORD,
+    thread_id: api.DWORD,
 
     /// Initialize a new text field structure
     pub fn init() TextField {
@@ -82,7 +84,7 @@ pub const TextField = struct {
         }
 
         // Get the process and thread IDs
-        var process_id: common.DWORD = undefined;
+        var process_id: api.DWORD = undefined;
         self.thread_id = GetWindowThreadProcessId(self.handle, &process_id);
         self.process_id = process_id;
 
@@ -102,7 +104,7 @@ pub const TextField = struct {
         }
 
         // Get the current selection range
-        const selection = SendMessageA(self.handle, common.EM_GETSEL, 0, 0);
+        const selection = SendMessageA(self.handle, api.EM_GETSEL, 0, 0);
         self.selection_start = @intCast(selection & 0xFFFF);
         self.selection_end = @intCast((selection >> 16) & 0xFFFF);
 
@@ -118,7 +120,7 @@ pub const TextField = struct {
         }
 
         // First, get the text length
-        const text_length_result = SendMessageA(self.handle, common.WM_GETTEXTLENGTH, 0, 0);
+        const text_length_result = SendMessageA(self.handle, api.WM_GETTEXTLENGTH, 0, 0);
         const text_length: usize = @intCast(text_length_result);
 
         if (text_length == 0) {
@@ -130,8 +132,8 @@ pub const TextField = struct {
 
         // Get the text content
         const ptr_value: usize = @intFromPtr(buffer.ptr);
-        const lparam_value: common.LPARAM = @bitCast(ptr_value);
-        const result = SendMessageA(self.handle, common.WM_GETTEXT, text_length + 1, lparam_value);
+        const lparam_value: api.LPARAM = @bitCast(ptr_value);
+        const result = SendMessageA(self.handle, api.WM_GETTEXT, text_length + 1, lparam_value);
 
         if (result == 0) {
             allocator.free(buffer);
@@ -149,12 +151,12 @@ pub const TextField = struct {
         }
 
         // First, select all text
-        _ = SendMessageA(self.handle, common.EM_SETSEL, 0, -1);
+        _ = SendMessageA(self.handle, api.EM_SETSEL, 0, -1);
 
         // Then replace selection with new text
         const ptr_value: usize = @intFromPtr(text.ptr);
-        const lparam_value: common.LPARAM = @bitCast(ptr_value);
-        const result = SendMessageA(self.handle, common.EM_REPLACESEL, 1, // True to allow undo
+        const lparam_value: api.LPARAM = @bitCast(ptr_value);
+        const result = SendMessageA(self.handle, api.EM_REPLACESEL, 1, // True to allow undo
             lparam_value);
 
         if (result == 0) {
@@ -168,7 +170,7 @@ pub const TextField = struct {
             return TextFieldError.NotATextField;
         }
 
-        _ = SendMessageA(self.handle, common.EM_SETSEL, start, end);
+        _ = SendMessageA(self.handle, api.EM_SETSEL, start, end);
     }
 };
 

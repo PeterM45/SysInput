@@ -492,3 +492,27 @@ pub extern "user32" fn SendInput(
     pInputs: *const INPUT,
     cbSize: c_int,
 ) callconv(.C) UINT;
+
+// Device context functions
+pub extern "user32" fn GetDC(
+    hWnd: ?HWND,
+) callconv(.C) ?HDC;
+
+pub extern "user32" fn ReleaseDC(
+    hWnd: ?HWND,
+    hDC: HDC,
+) callconv(.C) c_int;
+
+pub extern "gdi32" fn GetDeviceCaps(
+    hdc: HDC,
+    nIndex: c_int,
+) callconv(.C) c_int;
+
+// Display metrics constants
+pub const LOGPIXELSY = 90;
+pub const LOGPIXELSX = 88;
+
+// System metrics function
+pub extern "user32" fn GetSystemMetrics(
+    nIndex: c_int,
+) callconv(.C) c_int;

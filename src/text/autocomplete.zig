@@ -1,5 +1,5 @@
 const std = @import("std");
-const dict = @import("../spellcheck/dictionary.zig");
+const dict = @import("dictionary.zig");
 
 /// Maximum number of suggestions to generate
 const MAX_SUGGESTIONS = 5;

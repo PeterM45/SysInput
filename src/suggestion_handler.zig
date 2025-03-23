@@ -1,11 +1,13 @@
 const std = @import("std");
-const common = @import("win32/common.zig");
-const spellcheck = @import("spellcheck/spellchecker.zig");
-const autocomplete = @import("autocomplete/autocomplete.zig");
-const autocomplete_ui = @import("ui/autocomplete_ui.zig");
-const text_completion = @import("ui/text_completion.zig");
-const buffer_controller = @import("buffer_controller.zig");
-const dict = @import("spellcheck/dictionary.zig");
+const sysinput = @import("sysinput.zig");
+
+const api = sysinput.win32.api;
+const spellcheck = sysinput.text.spellcheck;
+const autocomplete = sysinput.text.autocomplete;
+const suggestion_ui = sysinput.ui.suggestion_ui;
+const text_inject = sysinput.win32.text_inject;
+const buffer_controller = sysinput.buffer_controller;
+const dictionary = sysinput.text.dictionary;
 
 /// Global variables for allocator access
 var gpa_allocator: std.mem.Allocator = undefined;
@@ -23,7 +25,10 @@ pub var suggestions: std.ArrayList([]const u8) = undefined;
 pub var autocomplete_suggestions: std.ArrayList([]const u8) = undefined;
 
 /// Global UI for autocompletion suggestions
-pub var autocomplete_ui_manager: autocomplete_ui.AutocompleteUI = undefined;
+pub var autocomplete_ui_manager: suggestion_ui.AutocompleteUI = undefined;
+
+/// Last word processed for suggestions
+pub var last_word_processed: []const u8 = "";
 
 /// Initialize suggestion handling components
 pub fn init(allocator: std.mem.Allocator, module_instance: anytype) !void {
@@ -40,7 +45,7 @@ pub fn init(allocator: std.mem.Allocator, module_instance: anytype) !void {
     autocomplete_engine = try autocomplete.AutocompleteEngine.init(allocator, &spell_checker.dictionary);
 
     // Initialize UI
-    autocomplete_ui_manager = try autocomplete_ui.AutocompleteUI.init(allocator, module_instance);
+    autocomplete_ui_manager = try suggestion_ui.AutocompleteUI.init(allocator, module_instance);
 
     // Set callback
     autocomplete_ui_manager.setSelectionCallback(handleSuggestionSelection);
@@ -76,7 +81,25 @@ pub fn setCurrentWord(word: []const u8) void {
 
 /// Get autocompletion suggestions
 pub fn getAutocompleteSuggestions() !void {
+    // Skip processing if the word hasn't changed
+    if (std.mem.eql(u8, autocomplete_engine.current_word, last_word_processed) and
+        autocomplete_suggestions.items.len > 0)
+    {
+        return;
+    }
+
+    // Store the current word as the last processed
+    const current_word = autocomplete_engine.current_word;
+    const owned_word = try gpa_allocator.dupe(u8, current_word);
+    if (last_word_processed.len > 0) {
+        gpa_allocator.free(last_word_processed);
+    }
+    last_word_processed = owned_word;
+
+    // Clear existing suggestions
     autocomplete_suggestions.clearRetainingCapacity();
+
+    // Get new suggestions
     try autocomplete_engine.getSuggestions(&autocomplete_suggestions);
 }
 
@@ -129,12 +152,12 @@ pub fn handleSuggestionSelection(suggestion: []const u8) void {
 
         // Approach 1: Try using the text field directly with smart selection
         if (buffer_controller.hasActiveTextField()) {
-            const focus_hwnd = common.GetFocus();
+            const focus_hwnd = api.GetFocus();
             if (focus_hwnd != null) {
                 // Try multiple approaches to detect and select the current word
 
                 // 1. First try: Get current selection and guess word boundaries
-                const selection = common.SendMessageA(focus_hwnd.?, common.EM_GETSEL, 0, 0);
+                const selection = api.SendMessageA(focus_hwnd.?, api.EM_GETSEL, 0, 0);
                 const sel_u64: u64 = @bitCast(selection);
                 const end_pos: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
 
@@ -145,15 +168,15 @@ pub fn handleSuggestionSelection(suggestion: []const u8) void {
                     0;
 
                 // Select the current word
-                _ = common.SendMessageA(focus_hwnd.?, common.EM_SETSEL, start_pos, end_pos);
+                _ = api.SendMessageA(focus_hwnd.?, api.EM_SETSEL, start_pos, end_pos);
 
                 // Try more reliable replacement methods
                 const replacement = suggestion;
 
                 // Try direct insertion first
-                if (text_completion.insertTextAsSelection(focus_hwnd.?, replacement)) {
+                if (text_inject.insertTextAsSelection(focus_hwnd.?, replacement)) {
                     // Now append a space using the same method
-                    _ = text_completion.insertTextAsSelection(focus_hwnd.?, " ");
+                    _ = text_inject.insertTextAsSelection(focus_hwnd.?, " ");
 
                     // Force a synchronization of our buffer
                     const updated_text = buffer_controller.getActiveFieldText() catch |err| {

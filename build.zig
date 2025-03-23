@@ -1,4 +1,5 @@
 const std = @import("std");
+const Build = std.Build;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -14,6 +15,7 @@ pub fn build(b: *std.Build) void {
     // Link with Windows user32 library (needed for keyboard hooks and window functions)
     if (target.result.os.tag == .windows) {
         exe.linkSystemLibrary("user32");
+        exe.linkSystemLibrary("gdi32"); // Also link GDI32 for UI functions
         exe.linkLibC(); // Link C library for Windows API compatibility
     }
 

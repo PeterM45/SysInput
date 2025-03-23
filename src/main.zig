@@ -1,9 +1,11 @@
 const std = @import("std");
-const keyboard = @import("keyboard.zig");
-const buffer = @import("buffer/buffer.zig");
-const buffer_controller = @import("buffer_controller.zig");
-const suggestion_handler = @import("suggestion_handler.zig");
-const win32 = @import("win32/hook.zig");
+pub const sysinput = @import("sysinput.zig");
+
+const keyboard = sysinput.input.keyboard;
+const buffer = sysinput.core.buffer;
+const buffer_controller = sysinput.buffer_controller;
+const suggestion_handler = sysinput.suggestion_handler;
+const win32 = sysinput.win32.hook;
 
 /// General Purpose Allocator for dynamic memory
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};

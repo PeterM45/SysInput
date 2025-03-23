@@ -1,9 +1,9 @@
 const std = @import("std");
-const win32 = @import("win32/hook.zig");
-const common = @import("win32/common.zig");
+const sysinput = @import("../sysinput.zig");
 
-const buffer_controller = @import("buffer_controller.zig");
-const suggestion_handler = @import("suggestion_handler.zig");
+const win32 = sysinput.win32.hook;
+const buffer_controller = sysinput.buffer_controller;
+const suggestion_handler = sysinput.suggestion_handler;
 
 pub var g_hook: ?win32.HHOOK = null;
 
@@ -31,6 +31,9 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
 
         // Only process keydown events
         if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
+            // Track if we consumed the key
+            var key_consumed = false;
+
             // Handle navigation keys when autocomplete is visible
             if (suggestion_handler.isSuggestionUIVisible() and
                 (kbd.vkCode == win32.VK_UP or
@@ -54,13 +57,34 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                         suggestion_handler.navigateToNextSuggestion();
                         return 1; // Prevent default handling
                     },
-                    win32.VK_TAB, win32.VK_RIGHT, win32.VK_RETURN => {
+                    win32.VK_TAB, win32.VK_RIGHT => {
                         std.debug.print("Accepting current suggestion\n", .{});
                         // Accept current suggestion
                         suggestion_handler.acceptCurrentSuggestion();
                         return 1; // Prevent default handling
                     },
+                    win32.VK_RETURN => {
+                        std.debug.print("Accepting current suggestion with enter\n", .{});
+                        // Accept current suggestion
+                        suggestion_handler.acceptCurrentSuggestion();
+
+                        // Special handling for return key - after accepting suggestion,
+                        // we also need to properly handle the return key itself, so we don't
+                        // entirely consume it unless explicitly configured otherwise
+                        const config_consume_enter = true; // Make this configurable
+                        if (!config_consume_enter) {
+                            // Let the app handle enter normally
+                            key_consumed = false;
+                        } else {
+                            key_consumed = true;
+                        }
+                    },
                     else => {},
+                }
+
+                // If we consumed the key, prevent default handling
+                if (key_consumed) {
+                    return 1;
                 }
             }
 

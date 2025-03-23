@@ -1,8 +1,11 @@
 const std = @import("std");
-const buffer = @import("buffer/buffer.zig");
-const common = @import("win32/common.zig");
-const detection = @import("detection/text_field.zig");
-const suggestion_handler = @import("suggestion_handler.zig");
+const sysinput = @import("sysinput.zig");
+
+const buffer = sysinput.core.buffer;
+const api = sysinput.win32.api;
+const detection = sysinput.input.text_field;
+const suggestion_handler = sysinput.suggestion_handler;
+const debug = sysinput.core.debug;
 
 var buffer_allocator: std.mem.Allocator = undefined;
 
@@ -76,13 +79,13 @@ pub fn syncTextFieldWithBuffer() void {
 
 /// Try updating text field using standard messages
 fn tryNormalTextFieldUpdate(content: []const u8) bool {
-    const focus_hwnd = common.GetFocus();
+    const focus_hwnd = api.GetFocus();
     if (focus_hwnd == null) {
         return false;
     }
 
     // Select all text
-    _ = common.SendMessageA(focus_hwnd.?, common.EM_SETSEL, 0, -1);
+    _ = api.SendMessageA(focus_hwnd.?, api.EM_SETSEL, 0, -1);
 
     // Replace with our content
     const text_buffer = std.heap.page_allocator.allocSentinel(u8, content.len, 0) catch {
@@ -92,15 +95,15 @@ fn tryNormalTextFieldUpdate(content: []const u8) bool {
 
     @memcpy(text_buffer, content);
 
-    const result = common.SendMessageA(focus_hwnd.?, common.EM_REPLACESEL, 1, // Allow undo
-        @as(common.LPARAM, @intCast(@intFromPtr(text_buffer.ptr))));
+    const result = api.SendMessageA(focus_hwnd.?, api.EM_REPLACESEL, 1, // Allow undo
+        @as(api.LPARAM, @intCast(@intFromPtr(text_buffer.ptr))));
 
     return result != 0;
 }
 
 /// Try updating using clipboard
 fn tryClipboardUpdate(content: []const u8) bool {
-    const focus_hwnd = common.GetFocus();
+    const focus_hwnd = api.GetFocus();
     if (focus_hwnd == null) {
         return false;
     }
@@ -114,12 +117,12 @@ fn tryClipboardUpdate(content: []const u8) bool {
     }
 
     // Try to save original clipboard
-    if (common.OpenClipboard(null) != 0) {
-        const original_handle = common.GetClipboardData(common.CF_TEXT);
+    if (api.OpenClipboard(null) != 0) {
+        const original_handle = api.GetClipboardData(api.CF_TEXT);
         if (original_handle != null) {
-            const data_ptr = common.GlobalLock(original_handle.?);
+            const data_ptr = api.GlobalLock(original_handle.?);
             if (data_ptr != null) {
-                const str_len = common.lstrlenA(data_ptr);
+                const str_len = api.lstrlenA(data_ptr);
                 if (str_len > 0) {
                     const u_str_len: usize = @intCast(str_len);
                     original_clipboard_text = std.heap.page_allocator.alloc(u8, u_str_len + 1) catch null;
@@ -128,57 +131,57 @@ fn tryClipboardUpdate(content: []const u8) bool {
                         text_buffer[u_str_len] = 0; // Null terminate
                     }
                 }
-                _ = common.GlobalUnlock(original_handle.?);
+                _ = api.GlobalUnlock(original_handle.?);
             }
         }
-        _ = common.CloseClipboard();
+        _ = api.CloseClipboard();
     }
 
     // Set clipboard with new content
-    if (common.OpenClipboard(null) != 0) {
-        _ = common.EmptyClipboard();
+    if (api.OpenClipboard(null) != 0) {
+        _ = api.EmptyClipboard();
 
-        const handle = common.GlobalAlloc(common.GMEM_MOVEABLE, content.len + 1);
+        const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, content.len + 1);
         if (handle != null) {
-            const data_ptr = common.GlobalLock(handle.?);
+            const data_ptr = api.GlobalLock(handle.?);
             if (data_ptr != null) {
                 @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..content.len], content);
                 @as([*]u8, @ptrCast(data_ptr))[content.len] = 0; // Null terminate
-                _ = common.GlobalUnlock(handle.?);
+                _ = api.GlobalUnlock(handle.?);
 
-                _ = common.SetClipboardData(common.CF_TEXT, handle);
+                _ = api.SetClipboardData(api.CF_TEXT, handle);
             }
         }
 
-        _ = common.CloseClipboard();
+        _ = api.CloseClipboard();
 
         // Select all text in control
-        _ = common.SendMessageA(focus_hwnd.?, common.EM_SETSEL, 0, -1);
+        _ = api.SendMessageA(focus_hwnd.?, api.EM_SETSEL, 0, -1);
 
         // Send paste command
-        _ = common.SendMessageA(focus_hwnd.?, common.WM_PASTE, 0, 0);
+        _ = api.SendMessageA(focus_hwnd.?, api.WM_PASTE, 0, 0);
 
         // Wait for paste to complete
-        common.Sleep(50);
+        api.Sleep(50);
 
         // Restore original clipboard if needed
         if (original_clipboard_text) |orig_text| {
-            if (common.OpenClipboard(null) != 0) {
-                _ = common.EmptyClipboard();
+            if (api.OpenClipboard(null) != 0) {
+                _ = api.EmptyClipboard();
 
-                const restore_handle = common.GlobalAlloc(common.GMEM_MOVEABLE, orig_text.len);
+                const restore_handle = api.GlobalAlloc(api.GMEM_MOVEABLE, orig_text.len);
                 if (restore_handle != null) {
-                    const restore_ptr = common.GlobalLock(restore_handle.?);
+                    const restore_ptr = api.GlobalLock(restore_handle.?);
                     if (restore_ptr != null) {
                         @memcpy(@as([*]u8, @ptrCast(restore_ptr))[0 .. orig_text.len - 1], orig_text[0 .. orig_text.len - 1]);
                         @as([*]u8, @ptrCast(restore_ptr))[orig_text.len - 1] = 0; // Null terminate
-                        _ = common.GlobalUnlock(restore_handle.?);
+                        _ = api.GlobalUnlock(restore_handle.?);
 
-                        _ = common.SetClipboardData(common.CF_TEXT, restore_handle);
+                        _ = api.SetClipboardData(api.CF_TEXT, restore_handle);
                     }
                 }
 
-                _ = common.CloseClipboard();
+                _ = api.CloseClipboard();
             }
         }
 
@@ -190,52 +193,52 @@ fn tryClipboardUpdate(content: []const u8) bool {
 
 /// Try updating using key simulation
 fn tryKeySimulation(content: []const u8) bool {
-    const focus_hwnd = common.GetFocus();
+    const focus_hwnd = api.GetFocus();
     if (focus_hwnd == null) {
         return false;
     }
 
     // Bring window to foreground
-    _ = common.SetForegroundWindow(focus_hwnd.?);
+    _ = api.SetForegroundWindow(focus_hwnd.?);
 
     // Select all existing text using Ctrl+A
     // Simulate Ctrl down
-    var key_input: common.INPUT = undefined;
-    key_input.type = common.INPUT_KEYBOARD;
-    key_input.ki.wVk = common.VK_CONTROL;
+    var key_input: api.INPUT = undefined;
+    key_input.type = api.INPUT_KEYBOARD;
+    key_input.ki.wVk = api.VK_CONTROL;
     key_input.ki.wScan = 0;
     key_input.ki.dwFlags = 0; // Key down
     key_input.ki.time = 0;
     key_input.ki.dwExtraInfo = 0;
-    _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+    _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
     // Send A key
     key_input.ki.wVk = 'A';
-    _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+    _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
     // Release A key
     key_input.ki.wVk = 'A';
-    key_input.ki.dwFlags = common.KEYEVENTF_KEYUP;
-    _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+    key_input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+    _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
     // Release Ctrl key
-    key_input.ki.wVk = common.VK_CONTROL;
-    _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+    key_input.ki.wVk = api.VK_CONTROL;
+    _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
     // Short delay
-    common.Sleep(30);
+    api.Sleep(30);
 
     // Send each character
     for (content) |c| {
         key_input.ki.wVk = 0;
         key_input.ki.wScan = c;
-        key_input.ki.dwFlags = common.KEYEVENTF_UNICODE;
-        _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+        key_input.ki.dwFlags = api.KEYEVENTF_UNICODE;
+        _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
-        key_input.ki.dwFlags = common.KEYEVENTF_UNICODE | common.KEYEVENTF_KEYUP;
-        _ = common.SendInput(1, &key_input, @sizeOf(common.INPUT));
+        key_input.ki.dwFlags = api.KEYEVENTF_UNICODE | api.KEYEVENTF_KEYUP;
+        _ = api.SendInput(1, &key_input, @sizeOf(api.INPUT));
 
-        common.Sleep(1); // Very short delay between keys
+        api.Sleep(1); // Very short delay between keys
     }
 
     return true;
@@ -245,7 +248,7 @@ fn tryKeySimulation(content: []const u8) bool {
 pub fn printBufferState() void {
     const content = buffer_manager.getCurrentText();
     // Print content with safe escaping for non-printable characters
-    std.debug.print("Buffer: \"", .{});
+    debug.debugPrint("Buffer: \"{s}\"\n", .{content});
     for (content) |c| {
         if (std.ascii.isPrint(c)) {
             std.debug.print("{c}", .{c});
@@ -412,4 +415,79 @@ pub fn resetBuffer() void {
 pub fn processCharInput(char: u8) !void {
     try buffer_manager.processKeyPress(char, true);
     syncTextFieldWithBuffer();
+}
+
+/// Synchronize buffer content with active text field, with verification
+pub fn syncTextFieldWithBufferAndVerify() bool {
+    if (!text_field_manager.has_active_field) {
+        return false;
+    }
+
+    // Store the content we want to insert
+    const content = buffer_manager.getCurrentText();
+    std.debug.print("Syncing buffer to text field: \"{s}\"\n", .{content});
+
+    // Try normal method first
+    if (tryNormalTextFieldUpdate(content)) {
+        // Verify the text was actually inserted
+        const verified = verifyTextUpdate(content);
+        if (verified) {
+            std.debug.print("Text update verified successfully\n", .{});
+            return true;
+        }
+    }
+
+    // Try clipboard method
+    if (tryClipboardUpdate(content)) {
+        // Verify the text was actually inserted
+        const verified = verifyTextUpdate(content);
+        if (verified) {
+            std.debug.print("Clipboard update verified successfully\n", .{});
+            return true;
+        }
+    }
+
+    // Last resort: key simulation
+    if (tryKeySimulation(content)) {
+        // Give more time for key simulation to complete
+        api.Sleep(100);
+        const verified = verifyTextUpdate(content);
+        if (verified) {
+            std.debug.print("Key simulation verified successfully\n", .{});
+            return true;
+        }
+    }
+
+    std.debug.print("Failed to update text field reliably\n", .{});
+    return false;
+}
+
+/// Verify text update succeeded by reading back from the control
+fn verifyTextUpdate(expected_content: []const u8) bool {
+    const updated_text = text_field_manager.getActiveFieldText() catch |err| {
+        std.debug.print("Failed to get updated text: {}\n", .{err});
+        return false;
+    };
+    defer buffer_allocator.free(updated_text);
+
+    // Special case: If we're expecting empty text, any very short text is ok
+    if (expected_content.len == 0 and updated_text.len < 3) {
+        return true;
+    }
+
+    // Compare updated text with what we expected - allow partial matches
+    // since some applications format input or add content
+    if (updated_text.len >= expected_content.len) {
+        // Check if updated_text contains our content
+        if (std.mem.indexOf(u8, updated_text, expected_content) != null) {
+            return true;
+        }
+    } else if (expected_content.len > 0 and updated_text.len > 0) {
+        // Or if our content contains the updated text
+        if (std.mem.indexOf(u8, expected_content, updated_text) != null) {
+            return true;
+        }
+    }
+
+    return false;
 }
