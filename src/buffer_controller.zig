@@ -7,6 +7,13 @@ const detection = sysinput.input.text_field;
 const suggestion_handler = sysinput.suggestion_handler;
 const debug = sysinput.core.debug;
 
+/// Sync mode determines which synchronization strategy to use
+pub const SyncMode = enum(u8) {
+    Normal = 0, // Use normal text field update
+    Clipboard = 1, // Use clipboard-based method
+    Simulation = 2, // Use key simulation
+};
+
 var buffer_allocator: std.mem.Allocator = undefined;
 
 /// Global buffer manager to track typed text
@@ -15,10 +22,23 @@ pub var buffer_manager: buffer.BufferManager = undefined;
 /// Global text field manager for detecting active text fields
 pub var text_field_manager: detection.TextFieldManager = undefined;
 
+/// Last known text content - used for change detection and verification
+var last_known_text: []u8 = &[_]u8{};
+
+/// Sync attempt counter for retry mechanism
+var sync_attempt_count: u8 = 0;
+
+/// Map to remember which sync mode works best with each window class
+var window_class_to_mode = std.StringHashMap(u8).init(std.heap.page_allocator);
+
 pub fn init(allocator: std.mem.Allocator) !void {
     buffer_allocator = allocator;
     buffer_manager = buffer.BufferManager.init(allocator);
     text_field_manager = detection.TextFieldManager.init(allocator);
+    last_known_text = try allocator.alloc(u8, 0);
+
+    // Initialize window class map with proper allocator
+    window_class_to_mode = std.StringHashMap(u8).init(allocator);
 }
 
 /// Detect the active text field and sync with our buffer
@@ -53,28 +73,11 @@ pub fn syncTextFieldWithBuffer() void {
         return;
     }
 
-    const content = buffer_manager.getCurrentText();
-    std.debug.print("Syncing buffer to text field: \"{s}\"\n", .{content});
-
-    // Try using normal text field update
-    if (tryNormalTextFieldUpdate(content)) {
-        std.debug.print("Normal text field update succeeded\n", .{});
-        return;
+    if (syncTextFieldWithBufferAndVerify()) {
+        debug.debugPrint("Text field sync succeeded\n", .{});
+    } else {
+        debug.debugPrint("All sync methods failed\n", .{});
     }
-
-    // Try using clipboard method as fallback
-    if (tryClipboardUpdate(content)) {
-        std.debug.print("Clipboard update succeeded\n", .{});
-        return;
-    }
-
-    // Try using key simulation as last resort
-    if (tryKeySimulation(content)) {
-        std.debug.print("Key simulation succeeded\n", .{});
-        return;
-    }
-
-    std.debug.print("Failed to update text field\n", .{});
 }
 
 /// Try updating text field using standard messages
@@ -427,39 +430,109 @@ pub fn syncTextFieldWithBufferAndVerify() bool {
     const content = buffer_manager.getCurrentText();
     std.debug.print("Syncing buffer to text field: \"{s}\"\n", .{content});
 
-    // Try normal method first
-    if (tryNormalTextFieldUpdate(content)) {
-        // Verify the text was actually inserted
-        const verified = verifyTextUpdate(content);
-        if (verified) {
-            std.debug.print("Text update verified successfully\n", .{});
+    // Get window class to determine best method
+    const focus_hwnd = api.GetFocus();
+    var preferred_mode: ?SyncMode = null;
+
+    if (focus_hwnd != null) {
+        var class_name: [64]u8 = [_]u8{0} ** 64;
+        const class_ptr: [*:0]u8 = @ptrCast(&class_name);
+        const class_len = detection.GetClassNameA(focus_hwnd.?, class_ptr, 64);
+
+        if (class_len > 0) {
+            const class_slice = class_name[0..@intCast(class_len)];
+            debug.debugPrint("Window class: {s}\n", .{class_slice});
+
+            // Check if we have a preferred method for this class
+            if (window_class_to_mode.get(class_slice)) |mode_val| {
+                preferred_mode = @as(SyncMode, @enumFromInt(mode_val));
+                debug.debugPrint("Using preferred sync mode: {s}\n", .{@tagName(preferred_mode.?)});
+            }
+        }
+    }
+
+    // Try methods in order of preference
+    var success = false;
+
+    // Try preferred method first if we have one
+    if (preferred_mode) |mode| {
+        success = trySyncMethod(mode, content);
+        if (success) {
+            debug.debugPrint("Preferred method {s} succeeded\n", .{@tagName(mode)});
             return true;
         }
     }
 
-    // Try clipboard method
-    if (tryClipboardUpdate(content)) {
-        // Verify the text was actually inserted
-        const verified = verifyTextUpdate(content);
-        if (verified) {
-            std.debug.print("Clipboard update verified successfully\n", .{});
-            return true;
-        }
-    }
+    // Otherwise, try methods in default order (skipping any we already tried)
+    const methods = [_]SyncMode{ .Normal, .Clipboard, .Simulation };
 
-    // Last resort: key simulation
-    if (tryKeySimulation(content)) {
-        // Give more time for key simulation to complete
-        api.Sleep(100);
-        const verified = verifyTextUpdate(content);
-        if (verified) {
-            std.debug.print("Key simulation verified successfully\n", .{});
+    for (methods) |mode| {
+        // Skip if this was already tried as the preferred method
+        if (preferred_mode != null and mode == preferred_mode.?) {
+            continue;
+        }
+
+        success = trySyncMethod(mode, content);
+        if (success) {
+            // Remember this successful method for this window class
+            if (focus_hwnd != null) {
+                var class_name: [64]u8 = [_]u8{0} ** 64;
+                const class_ptr: [*:0]u8 = @ptrCast(&class_name);
+                const class_len = detection.GetClassNameA(focus_hwnd.?, class_ptr, 64);
+
+                if (class_len > 0) {
+                    const class_slice = class_name[0..@intCast(class_len)];
+                    const owned_class = buffer_allocator.dupe(u8, class_slice) catch {
+                        debug.debugPrint("Failed to allocate for class name\n", .{});
+                        return true;
+                    };
+
+                    window_class_to_mode.put(owned_class, @intFromEnum(mode)) catch {
+                        buffer_allocator.free(owned_class);
+                        debug.debugPrint("Failed to store class preference\n", .{});
+                    };
+
+                    debug.debugPrint("Learned: {s} works best with {s}\n", .{ class_slice, @tagName(mode) });
+                }
+            }
+
             return true;
         }
     }
 
     std.debug.print("Failed to update text field reliably\n", .{});
     return false;
+}
+
+/// Try a specific sync method with verification
+fn trySyncMethod(mode: SyncMode, content: []const u8) bool {
+    var success = false;
+
+    switch (mode) {
+        .Normal => {
+            success = tryNormalTextFieldUpdate(content);
+        },
+        .Clipboard => {
+            success = tryClipboardUpdate(content);
+        },
+        .Simulation => {
+            success = tryKeySimulation(content);
+            // Give more time for key simulation to complete
+            if (success) api.Sleep(100);
+        },
+    }
+
+    // Verify success
+    if (success) {
+        success = verifyTextUpdate(content);
+        if (success) {
+            debug.debugPrint("{s} succeeded and verified\n", .{@tagName(mode)});
+        } else {
+            debug.debugPrint("{s} appeared to succeed but failed verification\n", .{@tagName(mode)});
+        }
+    }
+
+    return success;
 }
 
 /// Verify text update succeeded by reading back from the control
@@ -490,4 +563,18 @@ fn verifyTextUpdate(expected_content: []const u8) bool {
     }
 
     return false;
+}
+
+/// Cleanup resources
+pub fn deinit() void {
+    if (last_known_text.len > 0) {
+        buffer_allocator.free(last_known_text);
+    }
+
+    // Clean up window_class_to_mode map
+    var it = window_class_to_mode.iterator();
+    while (it.next()) |entry| {
+        buffer_allocator.free(entry.key_ptr.*);
+    }
+    window_class_to_mode.deinit();
 }
