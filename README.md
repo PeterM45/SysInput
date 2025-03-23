@@ -1,97 +1,100 @@
 # SysInput
 
-SysInput is a lightweight system utility written in Zig that provides spellchecking and autocompletion capabilities across Windows applications. It attempts to offer these features at a system level, rather than being limited to a single application.
+## Project Overview
+
+SysInput is a Windows utility written in Zig that provides system-wide autocomplete and spell checking functionality across all applications. It works by capturing keyboard input, detecting text fields, and offering intelligent suggestions as you type.
 
 ## Features
 
-- 📝 **Text buffer management**: Tracks what you're typing across applications
-- 🔍 **Text field detection**: Identifies active text input fields
-- ✅ **Spellchecking**: Detects misspelled words as you type
-- 🔮 **Autocompletion**: Suggests words as you type based on a dictionary
-- ⌨️ **Keyboard navigation**: Navigate through suggestions using arrow keys
+- System-wide text autocomplete for all Windows applications
+- Real-time spell checking with corrections
+- Smart suggestion display near the text cursor
+- Application-specific optimizations for better compatibility
+- Low-latency operation with minimal system resource usage
+- Learns from your typing patterns to improve suggestions over time
 
-## How It Works
-
-SysInput uses Windows API hooks to:
-
-1. Install a low-level keyboard hook to capture keystrokes
-2. Maintain a text buffer that mirrors what you're typing
-3. Detect active text fields across applications
-4. Provide inline word suggestions based on what you're typing
-5. Allow keyboard navigation through suggestions
-
-## Building from Source
+## Installation
 
 ### Prerequisites
 
-- Zig 0.14.0 or newer
-- Windows operating system
-- A dictionary file (placed in `resources/dictionary.txt`)
+- Windows 10/11
+- [Zig 0.14.0](https://ziglang.org/download/) or newer
 
-### Build Commands
+### Building from Source
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/SysInput.git
+1. Clone the repository
+
+```
+git clone https://github.com/PeterM45/SysInput.git
 cd SysInput
+```
 
-# Build the executable
-zig build-exe src/main.zig -luser32 -lgdi32 -fsingle-threaded
+2. Build the project
+
+```
+zig build
+```
+
+3. Run the executable
+
+```
+zig build run
 ```
 
 ## Usage
 
-1. Run the executable
-2. Start typing in any text field in any application
-3. As you type, SysInput will:
-   - Check spelling against its dictionary
-   - Offer word suggestions as you type
-   - Show suggestion overlays near your cursor
+Once SysInput is running, it operates in the background and automatically detects text fields in any application.
+
+### Basic Operation
+
+- Type normally in any application
+- SysInput will display suggestions as you type
+- Press **Tab**, **Enter**, or **Right Arrow** to accept the current suggestion
+- Use **Up/Down Arrow** keys to navigate through multiple suggestions
+- Press **Esc** to dismiss suggestions
 
 ### Keyboard Shortcuts
 
-- `Tab` / `Right Arrow` / `Enter`: Accept the current suggestion
-- `Up Arrow`: Move to previous suggestion
-- `Down Arrow`: Move to next suggestion
-- `ESC`: Exit SysInput
+- **Alt+Esc**: Exit SysInput
+- **Ctrl+Space**: Force suggestion display
 
-## Project Structure
+## Development Status
 
-```
-├───src
-│   ├───buffer           # Text buffer management
-│   ├───detection        # Text field detection
-│   ├───spellcheck       # Spellchecking functionality
-│   ├───autocomplete     # Word suggestion engine
-│   ├───ui               # User interface for suggestions
-│   ├───win32            # Windows API integration
-│   └───main.zig         # Application entry point
-├───resources
-│   └───dictionary.txt   # Dictionary for spellchecking/autocompletion
-```
+SysInput is currently in active development. Key features are implemented, but some aspects are still being refined:
 
-## Current Limitations
+- **Working**: Core autocomplete functionality, suggestion display, and basic word replacement
+- **In Progress**: Improved text synchronization with various types of applications
+- **Planned**: Configuration UI, custom dictionary support, and additional language support
 
-- Works best with standard Windows text controls (e.g., Notepad, text fields)
-- May not integrate with applications using custom text rendering
-- Dictionary is static and not context-aware
-- Inline completion functionality may not work in all applications
-- Limited to the English language by default
+## Technical Details
 
-## Future Development
+### Architecture
 
-- Improve text field detection for better application compatibility
-- Add support for custom dictionaries and multiple languages
-- Create a more robust suggestion engine with context awareness
-- Implement learning from user typing patterns
-- Add a UI for configuration and dictionary management
-- Support for custom styling of suggestion interface
+SysInput uses a modular design with components for:
 
-## License
+- Input handling (keyboard hooks and text field detection)
+- Text processing (autocomplete engine and spell checking)
+- UI components (suggestion display)
+- Win32 API integration (Windows system interaction)
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Building Blocks
+
+- Text buffer management using gap buffer algorithm
+- Low-level keyboard event interception via Windows hooks
+- Application-aware text insertion techniques
+- Adaptive learning from user typing patterns
+
+## Contributing
+
+Contributions are welcome! If you'd like to help improve SysInput:
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -am 'Add some amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
+5. Submit a pull request
 
 ## Acknowledgments
 
-- Built with Zig programming language
-- Uses Windows API for system-level integration
+- Built with [Zig](https://ziglang.org/), a general-purpose programming language designed for robustness, optimality, and maintainability.
+- Thanks to all contributors who have helped make this project better.

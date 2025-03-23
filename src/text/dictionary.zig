@@ -5,8 +5,7 @@ const std = @import("std");
 pub const FALLBACK_WORDS = [_][]const u8{
     "the",  "be",  "to",  "of", "and",  "a",    "in", "that", "have", "I",
     "it",   "for", "not", "on", "with", "he",   "as", "you",  "do",   "at",
-    "this", "but", "his", "by", "from", "they", "we", "say",  "her",
-    "she",
+    "this", "but", "his", "by", "from", "they", "we", "say",  "her",  "she",
 };
 
 /// Dictionary structure for efficient word lookup

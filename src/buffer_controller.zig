@@ -289,10 +289,10 @@ pub fn printBufferState() void {
     };
 
     // Show suggestions if needed
-    suggestion_handler.showSuggestions(content, word) catch |err| {
+    const pos = sysinput.ui.position.getCaretPosition();
+    suggestion_handler.showSuggestions(content, word, pos.x, pos.y) catch |err| {
         std.debug.print("Error applying suggestions: {}\n", .{err});
     };
-
     // Check spelling
     if (word.len >= 2) {
         if (!suggestion_handler.isWordCorrect(word)) {

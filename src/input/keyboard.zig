@@ -4,6 +4,7 @@ const sysinput = @import("../sysinput.zig");
 const win32 = sysinput.win32.hook;
 const buffer_controller = sysinput.buffer_controller;
 const suggestion_handler = sysinput.suggestion_handler;
+const debug = sysinput.core.debug;
 
 pub var g_hook: ?win32.HHOOK = null;
 
@@ -95,6 +96,36 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                 kbd.vkCode == win32.VK_DELETE or
                 kbd.vkCode == win32.VK_RETURN or
                 kbd.vkCode == win32.VK_TAB;
+
+            const is_navigation_key = (kbd.vkCode == win32.VK_LEFT or
+                kbd.vkCode == win32.VK_RIGHT or
+                kbd.vkCode == win32.VK_UP or
+                kbd.vkCode == win32.VK_DOWN or
+                kbd.vkCode == win32.VK_HOME or
+                kbd.vkCode == win32.VK_END or
+                kbd.vkCode == win32.VK_PRIOR or // Page Up
+                kbd.vkCode == win32.VK_NEXT); // Page Down
+
+            // If suggestions UI is visible, use navigation keys for selection
+            if (suggestion_handler.isSuggestionUIVisible()) {
+                if (kbd.vkCode == win32.VK_UP) {
+                    suggestion_handler.navigateToPreviousSuggestion();
+                    return 1; // Consume the key
+                } else if (kbd.vkCode == win32.VK_DOWN) {
+                    suggestion_handler.navigateToNextSuggestion();
+                    return 1; // Consume the key
+                } else if (kbd.vkCode == win32.VK_TAB or
+                    kbd.vkCode == win32.VK_RETURN or
+                    kbd.vkCode == win32.VK_RIGHT)
+                {
+                    debug.debugPrint("Accepting suggestion via key: 0x{X}\n", .{kbd.vkCode});
+                    suggestion_handler.acceptCurrentSuggestion();
+                    return 1; // Consume the key
+                }
+            } else if (is_navigation_key) {
+                // If no suggestion UI, just pass navigation keys through
+                return win32.CallNextHookEx(null, nCode, wParam, lParam);
+            }
 
             const is_printable = kbd.vkCode >= 0x20 and kbd.vkCode <= 0x7E;
 

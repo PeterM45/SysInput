@@ -52,6 +52,7 @@ pub const WM_LBUTTONDOWN = 0x0201;
 
 // Text-related Window Messages
 pub const WM_GETTEXT = 0x000D;
+pub const WM_SETTEXT = 0x000C;
 pub const WM_GETTEXTLENGTH = 0x000E;
 pub const WM_PASTE = 0x0302;
 
@@ -90,6 +91,8 @@ pub const VK_TAB = 0x09; // Tab key
 pub const VK_SHIFT = 0x10; // Shift key
 pub const VK_CONTROL = 0x11; // Control key
 pub const VK_MENU = 0x12; // Alt key
+pub const VK_PRIOR = 0x21; // Page Up
+pub const VK_NEXT = 0x22; // Page Down
 
 //=============================================================================
 // WINDOW STYLE AND APPEARANCE CONSTANTS
