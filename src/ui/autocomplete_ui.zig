@@ -1,5 +1,8 @@
 const std = @import("std");
 const common = @import("../win32/common.zig");
+const suggestion_window = @import("suggestion_window.zig");
+const text_completion = @import("text_completion.zig");
+const ui_utils = @import("ui_utils.zig");
 
 /// Inline completion UI manager
 pub const AutocompleteUI = struct {
@@ -19,10 +22,17 @@ pub const AutocompleteUI = struct {
     current_suggestion: ?[]const u8,
     /// Callback for completing a suggestion
     selection_callback: ?*const fn ([]const u8) void,
+    /// Window handle for suggestion UI
+    suggestion_window: ?common.HWND,
+    /// Module instance
+    instance: common.HINSTANCE,
+    /// Window class atom for suggestion window
+    window_class_atom: common.ATOM,
 
     /// Initialize the inline completion
     pub fn init(allocator: std.mem.Allocator, instance: common.HINSTANCE) !AutocompleteUI {
-        _ = instance; // Not used in this implementation
+        // Register window class for suggestions
+        const atom = try suggestion_window.registerSuggestionWindowClass(instance);
 
         return AutocompleteUI{
             .suggestions = &[_][]const u8{},
@@ -33,28 +43,102 @@ pub const AutocompleteUI = struct {
             .current_word = "",
             .current_suggestion = null,
             .selection_callback = null,
+            .suggestion_window = null,
+            .instance = instance,
+            .window_class_atom = atom,
         };
     }
 
     /// Process suggestions for the current text
     pub fn showSuggestions(self: *AutocompleteUI, suggestions: [][]const u8, x: i32, y: i32) !void {
-        _ = x; // Not used in this implementation
-        _ = y; // Not used in this implementation
-
         self.suggestions = suggestions;
         self.selected_index = 0;
+        suggestion_window.g_ui_state.suggestions = suggestions;
+        suggestion_window.g_ui_state.selected_index = 0;
 
         // If we have suggestions, mark as visible and try to apply the first one
         if (suggestions.len > 0) {
             self.is_visible = true;
             self.current_suggestion = suggestions[0];
 
-            // Try to apply the suggestion via text selection
-            tryInlineCompletion(self.current_word, self.current_suggestion.?);
+            // Try multiple approaches for inline completion
+            if (!text_completion.tryDirectCompletion(self.current_word, self.current_suggestion.?)) {
+                // If direct completion fails, try using selection-based approach
+                _ = text_completion.trySelectionCompletion(self.current_word, self.current_suggestion.?);
+            }
+
+            // Show UI suggestion list near cursor position
+            try self.showSuggestionUI(x, y);
         } else {
-            self.is_visible = false;
-            self.current_suggestion = null;
+            self.hideSuggestions();
         }
+    }
+
+    /// Show the suggestion UI window
+    fn showSuggestionUI(self: *AutocompleteUI, x: i32, y: i32) !void {
+        // Only attempt to create or show the window if we have suggestions
+        if (self.suggestions.len == 0) {
+            return;
+        }
+
+        // Get position for suggestions
+        var suggested_pos = common.POINT{ .x = x, .y = y };
+
+        // Only use provided coordinates if they're non-zero
+        if (x == 0 and y == 0) {
+            // Get intelligent position based on caret or text field
+            suggested_pos = ui_utils.getCaretPosition();
+        }
+
+        // Adjust position to appear just below the text insertion point
+        suggested_pos.y += 20;
+
+        std.debug.print("Showing suggestion UI at {}, {}\n", .{ suggested_pos.x, suggested_pos.y });
+
+        // Calculate window size based on suggestions
+        const size = ui_utils.calculateSuggestionWindowSize(self.suggestions, suggestion_window.SUGGESTION_FONT_HEIGHT, suggestion_window.WINDOW_PADDING);
+
+        // Create window if it doesn't exist
+        if (self.suggestion_window == null) {
+            std.debug.print("Creating suggestion window\n", .{});
+
+            const window = common.CreateWindowExA(
+                common.WS_EX_TOPMOST | common.WS_EX_TOOLWINDOW | common.WS_EX_NOACTIVATE,
+                suggestion_window.SUGGESTION_WINDOW_CLASS,
+                "Suggestions\x00",
+                common.WS_POPUP | common.WS_BORDER,
+                suggested_pos.x,
+                suggested_pos.y,
+                size.width,
+                size.height,
+                null, // No parent
+                null, // No menu
+                self.instance,
+                null, // No lpParam
+            );
+
+            if (window == null) {
+                std.debug.print("Failed to create suggestion window\n", .{});
+                return error.WindowCreationFailed;
+            }
+
+            self.suggestion_window = window;
+        } else {
+            // Reposition existing window
+            _ = common.SetWindowPos(
+                self.suggestion_window.?,
+                common.HWND_TOPMOST,
+                suggested_pos.x,
+                suggested_pos.y,
+                size.width,
+                size.height,
+                common.SWP_SHOWWINDOW,
+            );
+        }
+
+        // Show the window
+        _ = common.ShowWindow(self.suggestion_window.?, common.SW_SHOWNOACTIVATE);
+        _ = common.UpdateWindow(self.suggestion_window.?);
     }
 
     /// Set current text context
@@ -67,6 +151,11 @@ pub const AutocompleteUI = struct {
     pub fn hideSuggestions(self: *AutocompleteUI) void {
         self.is_visible = false;
         self.current_suggestion = null;
+
+        // Hide the UI window if it exists
+        if (self.suggestion_window != null) {
+            _ = common.ShowWindow(self.suggestion_window.?, common.SW_HIDE);
+        }
     }
 
     /// Set the callback for suggestion selection
@@ -78,10 +167,19 @@ pub const AutocompleteUI = struct {
     pub fn selectSuggestion(self: *AutocompleteUI, index: i32) void {
         if (index >= 0 and index < self.suggestions.len) {
             self.selected_index = index;
+            suggestion_window.g_ui_state.selected_index = index;
             self.current_suggestion = self.suggestions[@intCast(index)];
 
+            // Update UI to highlight the selected suggestion
+            if (self.suggestion_window != null) {
+                _ = common.InvalidateRect(self.suggestion_window.?, null, 1);
+                _ = common.UpdateWindow(self.suggestion_window.?);
+            }
+
             // Try to apply the new suggestion
-            tryInlineCompletion(self.current_word, self.current_suggestion.?);
+            if (!text_completion.tryDirectCompletion(self.current_word, self.current_suggestion.?)) {
+                _ = text_completion.trySelectionCompletion(self.current_word, self.current_suggestion.?);
+            }
         }
     }
 
@@ -95,63 +193,15 @@ pub const AutocompleteUI = struct {
 
     /// Clean up resources
     pub fn deinit(self: *AutocompleteUI) void {
-        // No resources to clean up in this implementation
-        _ = self;
+        // Clean up window resources
+        if (self.suggestion_window != null) {
+            _ = common.DestroyWindow(self.suggestion_window.?);
+            self.suggestion_window = null;
+        }
+
+        // Unregister window class
+        if (self.window_class_atom != 0) {
+            _ = common.UnregisterClassA(suggestion_window.SUGGESTION_WINDOW_CLASS, self.instance);
+        }
     }
 };
-
-/// Try to apply inline completion using text selection
-fn tryInlineCompletion(partial_word: []const u8, suggestion: []const u8) void {
-    // Only proceed if the suggestion starts with the partial word
-    if (partial_word.len == 0 or !std.mem.startsWith(u8, suggestion, partial_word)) {
-        return;
-    }
-
-    // Get the active window and control
-    const hwnd = common.GetForegroundWindow();
-    if (hwnd == null) return;
-
-    // Get the control with focus (usually the text field)
-    const focus_hwnd = common.GetFocus();
-    if (focus_hwnd == null) return;
-
-    // Try to get selection/position in text field
-    var start: common.DWORD = undefined;
-    var end: common.DWORD = undefined;
-
-    // Try different methods to get text selection based on control type
-    // Cast to isize since LPARAM is isize
-    if (common.SendMessageA(focus_hwnd.?, common.EM_GETSEL, @as(common.WPARAM, @intFromPtr(&start)), @as(common.LPARAM, @intCast(@intFromPtr(&end)))) != 0) {
-        // We found a selection, now complete the word
-
-        // Calculate what part of the word we need to add
-        const completion = suggestion[partial_word.len..];
-
-        // First, position the cursor at the end of the partial word
-        _ = common.SendMessageA(focus_hwnd.?, common.EM_SETSEL, end, end);
-
-        // Insert the completion text as a selected block
-        insertTextAsSelection(focus_hwnd.?, completion);
-    }
-}
-
-/// Insert text as a selected block
-fn insertTextAsSelection(hwnd: common.HWND, text: []const u8) void {
-    // Create null-terminated text
-    const buffer = std.heap.page_allocator.allocSentinel(u8, text.len, 0) catch return;
-    defer std.heap.page_allocator.free(buffer);
-
-    // Copy the text to the buffer using @memcpy instead of std.mem.copy
-    @memcpy(buffer, text);
-
-    // Insert the text - cast to LPARAM (isize)
-    _ = common.SendMessageA(hwnd, common.EM_REPLACESEL, 1, @as(common.LPARAM, @intCast(@intFromPtr(buffer.ptr))));
-
-    // Get current selection
-    var start: common.DWORD = undefined;
-    var end: common.DWORD = undefined;
-    _ = common.SendMessageA(hwnd, common.EM_GETSEL, @as(common.WPARAM, @intFromPtr(&start)), @as(common.LPARAM, @intCast(@intFromPtr(&end))));
-
-    // Select just the inserted text
-    _ = common.SendMessageA(hwnd, common.EM_SETSEL, start - text.len, end);
-}

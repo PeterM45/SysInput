@@ -150,15 +150,35 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
     return win32.CallNextHookEx(null, nCode, wParam, lParam);
 }
 
+/// Print the current buffer state and process text for autocompletion
 fn printBufferState() void {
     const content = buffer_manager.getCurrentText();
-    std.debug.print("Buffer: \"{s}\" (len: {})\n", .{ content, content.len });
+    // Print content with safe escaping for non-printable characters
+    std.debug.print("Buffer: \"", .{});
+    for (content) |c| {
+        if (std.ascii.isPrint(c)) {
+            std.debug.print("{c}", .{c});
+        } else {
+            std.debug.print("\\x{X:0>2}", .{c});
+        }
+    }
+    std.debug.print("\" (len: {})\n", .{content.len});
 
     const word = buffer_manager.getCurrentWord() catch {
         std.debug.print("Error getting current word\n", .{});
         return;
     };
-    std.debug.print("Current word: \"{s}\"\n", .{word});
+
+    // Print word with safe escaping
+    std.debug.print("Current word: \"", .{});
+    for (word) |c| {
+        if (std.ascii.isPrint(c)) {
+            std.debug.print("{c}", .{c});
+        } else {
+            std.debug.print("\\x{X:0>2}", .{c});
+        }
+    }
+    std.debug.print("\"\n", .{});
 
     // Process the text through the autocompletion engine
     autocomplete_engine.processText(content) catch |err| {
@@ -195,10 +215,19 @@ fn printBufferState() void {
         autocomplete_ui_manager.hideSuggestions();
     }
 
-    // Spell checking (unchanged)
+    // Spell checking
     if (word.len >= 2) {
         if (!spell_checker.isCorrect(word)) {
-            std.debug.print("Spelling error detected: \"{s}\"\n", .{word});
+            // Safely print the word that has a spelling error
+            std.debug.print("Spelling error detected: \"", .{});
+            for (word) |c| {
+                if (std.ascii.isPrint(c)) {
+                    std.debug.print("{c}", .{c});
+                } else {
+                    std.debug.print("\\x{X:0>2}", .{c});
+                }
+            }
+            std.debug.print("\"\n", .{});
 
             // Limit suggestion generation to avoid excessive CPU usage
             const should_generate_suggestions = word.len < 15; // Skip very long words
@@ -314,6 +343,67 @@ fn handleSuggestionSelection(suggestion: []const u8) void {
     if (current_word.len > 0) {
         std.debug.print("Replacing word \"{s}\" with suggestion \"{s}\"\n", .{ current_word, suggestion });
 
+        // Approach 1: Try using the text field directly
+        if (text_field_manager.has_active_field) {
+            const focus_hwnd = common.GetFocus();
+            if (focus_hwnd != null) {
+                // Get text selection
+                const selection = common.SendMessageA(focus_hwnd.?, common.EM_GETSEL, 0, 0);
+                const sel_u64: u64 = @bitCast(selection);
+                const end_pos: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
+
+                // Calculate the start of the current word
+                const start_pos = if (end_pos >= current_word.len)
+                    end_pos - current_word.len
+                else
+                    0;
+
+                // Select the current word
+                _ = common.SendMessageA(focus_hwnd.?, common.EM_SETSEL, start_pos, end_pos);
+                // Insert the replacement
+                const replacement_buffer = std.heap.page_allocator.allocSentinel(u8, suggestion.len, 0) catch {
+                    std.debug.print("Failed to allocate buffer for text replacement\n", .{});
+                    return;
+                };
+                defer std.heap.page_allocator.free(replacement_buffer);
+
+                @memcpy(replacement_buffer, suggestion);
+                _ = common.SendMessageA(focus_hwnd.?, common.EM_REPLACESEL, 1, // True to allow undo
+                    @as(common.LPARAM, @intCast(@intFromPtr(replacement_buffer.ptr))));
+
+                // Append a space
+                const space_buffer = std.heap.page_allocator.allocSentinel(u8, 1, 0) catch return;
+                defer std.heap.page_allocator.free(space_buffer);
+                space_buffer[0] = ' ';
+
+                _ = common.SendMessageA(focus_hwnd.?, common.EM_REPLACESEL, 1, @as(common.LPARAM, @intCast(@intFromPtr(space_buffer.ptr))));
+
+                // Force a synchronization of our buffer
+                const updated_text = text_field_manager.getActiveFieldText() catch |err| {
+                    std.debug.print("Failed to get updated text: {}\n", .{err});
+                    return;
+                };
+                defer gpa.allocator().free(updated_text);
+
+                buffer_manager.resetBuffer();
+                buffer_manager.insertString(updated_text) catch |err| {
+                    std.debug.print("Failed to update buffer: {}\n", .{err});
+                };
+
+                // Add the word to the autocompletion engine
+                autocomplete_engine.completeWord(suggestion) catch |err| {
+                    std.debug.print("Error adding word to autocompletion: {}\n", .{err});
+                };
+
+                // Hide the suggestions UI
+                autocomplete_ui_manager.hideSuggestions();
+                return;
+            }
+        }
+
+        // Fallback approach: use buffer manipulation
+        std.debug.print("Using fallback approach for word replacement\n", .{});
+
         // First delete the current word by backspacing
         var i: usize = 0;
         while (i < current_word.len) : (i += 1) {
@@ -329,8 +419,7 @@ fn handleSuggestionSelection(suggestion: []const u8) void {
             return;
         };
 
-        // Add a space after the suggestion by inserting a string with a space
-        // (replacing the insertChar which doesn't exist)
+        // Add a space after the suggestion
         buffer_manager.insertString(" ") catch |err| {
             std.debug.print("Space insertion error: {}\n", .{err});
         };

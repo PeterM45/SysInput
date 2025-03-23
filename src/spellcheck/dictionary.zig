@@ -7,7 +7,6 @@ pub const FALLBACK_WORDS = [_][]const u8{
     "it",   "for", "not", "on", "with", "he",   "as", "you",  "do",   "at",
     "this", "but", "his", "by", "from", "they", "we", "say",  "her",
     "she",
-    // Add more fallback words as needed...
 };
 
 /// Dictionary structure for efficient word lookup

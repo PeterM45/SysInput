@@ -17,10 +17,14 @@ pub const WCHAR = u16;
 pub const ATOM = u16;
 pub const HDC = *anyopaque; // Handle to Device Context
 pub const COLORREF = u32; // RGB color value
+pub const HFONT = *anyopaque; // Handle to Font
+pub const HGDIOBJ = *anyopaque; // Handle to GDI Object
+pub const HBRUSH = *anyopaque; // Handle to Brush
 
 // Windows Message Constants
 pub const WM_KEYDOWN = 0x0100;
 pub const WM_KEYUP = 0x0101;
+pub const WM_CHAR = 0x0102;
 pub const WM_SYSKEYDOWN = 0x0104;
 pub const WM_SYSKEYUP = 0x0105;
 pub const WM_GETTEXT = 0x000D;
@@ -30,6 +34,8 @@ pub const WM_CLOSE = 0x0010;
 pub const WM_DESTROY = 0x0002;
 pub const WM_LBUTTONDOWN = 0x0201;
 pub const WM_ERASEBKGND = 0x0014;
+pub const WM_CREATE = 0x0001;
+pub const WM_USER = 0x0400;
 
 // Edit control message constants
 pub const EM_GETSEL = 0x00B0;
@@ -73,6 +79,31 @@ pub const WS_BORDER = 0x00800000;
 pub const WS_CAPTION = 0x00C00000;
 pub const WS_EX_TOPMOST = 0x00000008;
 pub const WS_EX_TOOLWINDOW = 0x00000080;
+pub const WS_EX_NOACTIVATE = 0x08000000;
+pub const CS_DROPSHADOW = 0x00020000;
+
+// Show window commands
+pub const SW_SHOW = 5;
+pub const SW_SHOWNOACTIVATE = 4;
+pub const SW_HIDE = 0;
+
+// Font constants
+pub const FW_NORMAL = 400;
+pub const ANSI_CHARSET = 0;
+pub const OUT_DEFAULT_PRECIS = 0;
+pub const CLIP_DEFAULT_PRECIS = 0;
+pub const DEFAULT_QUALITY = 0;
+pub const DEFAULT_PITCH = 0;
+pub const FF_DONTCARE = 0;
+
+// Drawing constants
+pub const DT_LEFT = 0x00000000;
+pub const DT_SINGLELINE = 0x00000020;
+pub const DT_VCENTER = 0x00000004;
+pub const TRANSPARENT = 1;
+
+// Standard cursor IDs
+pub const IDC_ARROW = 32512;
 
 // Keyboard Hook Structure
 pub const KBDLLHOOKSTRUCT = extern struct {
@@ -149,13 +180,27 @@ pub extern "user32" fn GetCursorPos(
 // Extended window styles
 pub const WS_EX_LAYERED = 0x00080000;
 pub const WS_EX_TRANSPARENT = 0x00000020;
-pub const WS_EX_NOACTIVATE = 0x08000000;
+pub const GWL_EXSTYLE = -20;
+pub const PS_SOLID = 0;
+
+// Stock object constants
+pub const WHITE_BRUSH = 0;
+pub const LTGRAY_BRUSH = 1;
+pub const GRAY_BRUSH = 2;
+pub const DKGRAY_BRUSH = 3;
+pub const BLACK_BRUSH = 4;
+pub const NULL_BRUSH = 5;
+pub const WHITE_PEN = 6;
+pub const BLACK_PEN = 7;
+
+// GDI stock objects
+pub extern "gdi32" fn GetStockObject(
+    fnObject: c_int,
+) callconv(.C) ?HGDIOBJ;
 
 // Layered window constants
 pub const LWA_ALPHA = 0x00000002;
 pub const LWA_COLORKEY = 0x00000001;
-pub const GWL_EXSTYLE = -20;
-pub const PS_SOLID = 0;
 
 // Additional window and control functions
 pub extern "user32" fn GetForegroundWindow() callconv(.C) ?HWND;
@@ -166,3 +211,169 @@ pub extern "user32" fn SendMessageA(
     wParam: WPARAM,
     lParam: LPARAM,
 ) callconv(.C) LRESULT;
+
+// Additional window functions
+pub extern "user32" fn RegisterClassExA(
+    lpWndClass: *const WNDCLASSEX,
+) callconv(.C) ATOM;
+
+pub extern "user32" fn UnregisterClassA(
+    lpClassName: [*:0]const u8,
+    hInstance: HINSTANCE,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn CreateWindowExA(
+    dwExStyle: DWORD,
+    lpClassName: [*:0]const u8,
+    lpWindowName: [*:0]const u8,
+    dwStyle: DWORD,
+    x: c_int,
+    y: c_int,
+    nWidth: c_int,
+    nHeight: c_int,
+    hWndParent: ?HWND,
+    hMenu: ?HANDLE,
+    hInstance: HINSTANCE,
+    lpParam: ?*anyopaque,
+) callconv(.C) ?HWND;
+
+pub extern "user32" fn ShowWindow(
+    hWnd: HWND,
+    nCmdShow: c_int,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn UpdateWindow(
+    hWnd: HWND,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn SetWindowPos(
+    hWnd: HWND,
+    hWndInsertAfter: ?HWND,
+    X: c_int,
+    Y: c_int,
+    cx: c_int,
+    cy: c_int,
+    uFlags: UINT,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn GetClientRect(
+    hWnd: HWND,
+    lpRect: *RECT,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn InvalidateRect(
+    hWnd: ?HWND,
+    lpRect: ?*const RECT,
+    bErase: BOOL,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn DestroyWindow(
+    hWnd: HWND,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn LoadCursorA(
+    hInstance: ?HINSTANCE,
+    lpCursorName: [*:0]const u8,
+) callconv(.C) ?HANDLE;
+
+pub extern "user32" fn DefWindowProcA(
+    hWnd: HWND,
+    Msg: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM,
+) callconv(.C) LRESULT;
+
+pub extern "user32" fn BeginPaint(
+    hWnd: HWND,
+    lpPaint: *PAINTSTRUCT,
+) callconv(.C) HDC;
+
+pub extern "user32" fn EndPaint(
+    hWnd: HWND,
+    lpPaint: *const PAINTSTRUCT,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn GetParent(
+    hWnd: HWND,
+) callconv(.C) ?HWND;
+
+pub extern "user32" fn PostMessageA(
+    hWnd: HWND,
+    Msg: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM,
+) callconv(.C) BOOL;
+
+// GDI functions
+pub extern "gdi32" fn CreateFontA(
+    cHeight: c_int,
+    cWidth: c_int,
+    cEscapement: c_int,
+    cOrientation: c_int,
+    cWeight: c_int,
+    bItalic: DWORD,
+    bUnderline: DWORD,
+    bStrikeOut: DWORD,
+    iCharSet: DWORD,
+    iOutPrecision: DWORD,
+    iClipPrecision: DWORD,
+    iQuality: DWORD,
+    iPitchAndFamily: DWORD,
+    pszFaceName: [*:0]const u8,
+) callconv(.C) ?HFONT;
+
+pub extern "gdi32" fn SelectObject(
+    hdc: HDC,
+    h: HGDIOBJ,
+) callconv(.C) ?HGDIOBJ;
+
+pub extern "gdi32" fn DeleteObject(
+    ho: HGDIOBJ,
+) callconv(.C) BOOL;
+
+pub extern "gdi32" fn CreateSolidBrush(
+    color: COLORREF,
+) callconv(.C) ?HBRUSH;
+
+pub extern "user32" fn FillRect(
+    hDC: HDC,
+    lprc: *const RECT,
+    hbr: HANDLE,
+) callconv(.C) c_int;
+
+pub extern "gdi32" fn SetTextColor(
+    hdc: HDC,
+    color: COLORREF,
+) callconv(.C) COLORREF;
+
+pub extern "gdi32" fn SetBkMode(
+    hdc: HDC,
+    mode: c_int,
+) callconv(.C) c_int;
+
+pub extern "user32" fn DrawTextA(
+    hdc: HDC,
+    lpchText: [*:0]const u8,
+    cchText: c_int,
+    lprc: *RECT,
+    format: UINT,
+) callconv(.C) c_int;
+
+// Utility functions
+pub inline fn makeIntResource(id: u16) [*:0]const u8 {
+    return @ptrFromInt(id);
+}
+// Additional window positioning functions
+pub extern "user32" fn GetCaretPos(
+    lpPoint: *POINT,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn ClientToScreen(
+    hWnd: HWND,
+    lpPoint: *POINT,
+) callconv(.C) BOOL;
+
+pub extern "user32" fn GetWindowRect(
+    hWnd: HWND,
+    lpRect: *RECT,
+) callconv(.C) BOOL;

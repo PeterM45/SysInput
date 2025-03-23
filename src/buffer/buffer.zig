@@ -198,7 +198,8 @@ pub const TextBuffer = struct {
 
 /// Check if a character is part of a word
 fn isWordChar(c: u8) bool {
-    return std.ascii.isAlphanumeric(c) or c == '_';
+    // Only include letters, numbers, underscore, and apostrophe (for contractions)
+    return std.ascii.isAlphanumeric(c) or c == '_' or c == '\'';
 }
 
 /// Text buffer manager to handle multiple text fields across applications
