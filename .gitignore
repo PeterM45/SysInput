@@ -4,32 +4,43 @@ zig-out/
 build/
 build-*/
 
-# Executables
+# Binary output
 *.exe
-*.out
-*.app
+*.dll
+*.so
+*.dylib
 SysInput
 
 # Debug files
-*.dSYM/
-*.su
-*.idb
 *.pdb
-
-# Editor files
-.vscode/
-.idea/
-*.swp
-*~
+*.ilk
+*.exp
+*.lib
 
 # OS specific files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Dependencies
-deps/
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*~
+.vs/
 
-# Log files
+# Logs
 *.log
+logs/
 
-resources/dictionary.txt
+# User dictionary files (if any)
+*.dict
+*.user
+user_data/
+
+# Build artifacts
+cache/
+tmp/
+
+# Project specific
+resources/*
