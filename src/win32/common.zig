@@ -156,3 +156,13 @@ pub const LWA_ALPHA = 0x00000002;
 pub const LWA_COLORKEY = 0x00000001;
 pub const GWL_EXSTYLE = -20;
 pub const PS_SOLID = 0;
+
+// Additional window and control functions
+pub extern "user32" fn GetForegroundWindow() callconv(.C) ?HWND;
+pub extern "user32" fn GetFocus() callconv(.C) ?HWND;
+pub extern "user32" fn SendMessageA(
+    hWnd: HWND,
+    Msg: UINT,
+    wParam: WPARAM,
+    lParam: LPARAM,
+) callconv(.C) LRESULT;

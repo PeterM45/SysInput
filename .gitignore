@@ -31,3 +31,5 @@ deps/
 
 # Log files
 *.log
+
+resources/dictionary.txt

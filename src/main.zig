@@ -50,10 +50,12 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
         // Only process keydown events
         if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
             // Check if autocomplete UI is visible for navigation keys
+
             if (autocomplete_ui_manager.is_visible and
                 (kbd.vkCode == win32.VK_UP or
                     kbd.vkCode == win32.VK_DOWN or
                     kbd.vkCode == win32.VK_TAB or
+                    kbd.vkCode == win32.VK_RIGHT or
                     kbd.vkCode == win32.VK_RETURN))
             {
                 // Handle navigation keys for autocomplete
@@ -68,7 +70,7 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                         autocomplete_ui_manager.selectSuggestion(new_index);
                         return 1; // Prevent default handling
                     },
-                    win32.VK_DOWN, win32.VK_TAB => {
+                    win32.VK_DOWN => {
                         // Move to next suggestion
                         const new_index = if (autocomplete_ui_manager.selected_index >= autocomplete_suggestions.items.len - 1)
                             0
@@ -78,14 +80,10 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                         autocomplete_ui_manager.selectSuggestion(new_index);
                         return 1; // Prevent default handling
                     },
-                    win32.VK_RETURN => {
-                        // Select current suggestion
-                        if (autocomplete_ui_manager.selected_index >= 0) {
-                            const selected = autocomplete_suggestions.items[@intCast(autocomplete_ui_manager.selected_index)];
-                            handleSuggestionSelection(selected);
-                            autocomplete_ui_manager.hideSuggestions();
-                            return 1; // Prevent default handling
-                        }
+                    win32.VK_TAB, win32.VK_RIGHT, win32.VK_RETURN => {
+                        // Accept current suggestion
+                        autocomplete_ui_manager.acceptSuggestion();
+                        return 1; // Prevent default handling
                     },
                     else => {},
                 }
@@ -176,7 +174,7 @@ fn printBufferState() void {
         std.debug.print("Error getting autocompletion suggestions: {}\n", .{err});
     };
 
-    // Show autocompletion UI if we have suggestions and the word is at least 2 characters
+    // Apply autocompletion if we have suggestions and the word is at least 2 characters
     if (autocomplete_suggestions.items.len > 0 and word.len >= 2) {
         std.debug.print("Autocompletion suggestions: ", .{});
         for (autocomplete_suggestions.items, 0..) |suggestion, i| {
@@ -185,35 +183,19 @@ fn printBufferState() void {
         }
         std.debug.print("\n", .{});
 
-        // Get cursor position for showing UI
-        var cursor_pos: common.POINT = undefined;
-        if (common.GetCursorPos(&cursor_pos) != 0) {
-            // Get better position information from the text field manager if possible
-            if (text_field_manager.has_active_field) {
-                // Try to get caret position from the text field (hypothetical function)
-                // This would ideally come from the text_field_manager
-                // But for now we'll just use the mouse position with a small vertical offset
+        // Pass the current text context to the UI manager
+        autocomplete_ui_manager.setTextContext(content, word);
 
-                // Position the suggestions just below the cursor line
-                const font_height = 20; // Approximate font height
-
-                // Show suggestions UI just below the cursor (position it relative to the cursor)
-                autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, cursor_pos.x, cursor_pos.y + font_height) catch |err| {
-                    std.debug.print("Error showing suggestions UI: {}\n", .{err});
-                };
-            } else {
-                // Fall back to just using cursor position
-                autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, cursor_pos.x, cursor_pos.y + 20) catch |err| {
-                    std.debug.print("Error showing suggestions UI: {}\n", .{err});
-                };
-            }
-        }
+        // Try to show suggestions (this will now apply inline completion)
+        autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, 0, 0) catch |err| {
+            std.debug.print("Error applying suggestions: {}\n", .{err});
+        };
     } else if (word.len < 2) {
-        // Hide UI if word is too short
+        // Hide suggestions if word is too short
         autocomplete_ui_manager.hideSuggestions();
     }
 
-    // Only perform spell checking if the word is at least 2 characters
+    // Spell checking (unchanged)
     if (word.len >= 2) {
         if (!spell_checker.isCorrect(word)) {
             std.debug.print("Spelling error detected: \"{s}\"\n", .{word});
