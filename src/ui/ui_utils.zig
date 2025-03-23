@@ -1,34 +1,69 @@
 const std = @import("std");
 const common = @import("../win32/common.zig");
 
-/// Get the position of the text caret in screen coordinates
+/// Get the position of the text caret or active window
 pub fn getCaretPosition() common.POINT {
     var pt = common.POINT{ .x = 0, .y = 0 };
 
-    // Get the focus window (text field)
-    const focus_hwnd = common.GetFocus();
-    if (focus_hwnd == null) {
-        _ = common.GetCursorPos(&pt); // Fallback to cursor position
-        std.debug.print("No focus window, using cursor position\n", .{});
+    // Try to get foreground window first
+    const foreground_hwnd = common.GetForegroundWindow();
+    if (foreground_hwnd == null) {
+        // Last resort: use cursor position
+        _ = common.GetCursorPos(&pt);
+        std.debug.print("No foreground window, using cursor position\n", .{});
         return pt;
     }
 
-    std.debug.print("Found focused window at 0x{x}\n", .{@intFromPtr(focus_hwnd.?)});
+    std.debug.print("Found foreground window at 0x{x}\n", .{@intFromPtr(foreground_hwnd.?)});
 
-    // Method 1: Try to get position from text field bounds
-    var rect: common.RECT = undefined;
-    if (common.GetWindowRect(focus_hwnd.?, &rect) != 0) {
-        // Position in the middle of the text field
-        const midpoint_x = rect.left + @divTrunc(rect.right - rect.left, 2);
-        const text_y = rect.top + 20; // Position near the top of the text field
-
-        std.debug.print("Using text field position: {}, {}\n", .{ midpoint_x, text_y });
-        return .{ .x = midpoint_x, .y = text_y };
+    // First approach: Try to use cursor position if it's inside the window
+    var cursor_pos: common.POINT = undefined;
+    if (common.GetCursorPos(&cursor_pos) != 0) {
+        // Get window rect
+        var window_rect: common.RECT = undefined;
+        if (common.GetWindowRect(foreground_hwnd.?, &window_rect) != 0) {
+            // Check if cursor is inside window
+            if (cursor_pos.x >= window_rect.left and
+                cursor_pos.x <= window_rect.right and
+                cursor_pos.y >= window_rect.top and
+                cursor_pos.y <= window_rect.bottom)
+            {
+                // Position below cursor
+                pt.x = cursor_pos.x;
+                pt.y = cursor_pos.y + 20;
+                std.debug.print("Using cursor position inside window: {}, {}\n", .{ pt.x, pt.y });
+                return pt;
+            }
+        }
     }
 
-    // Last resort: use cursor position
-    _ = common.GetCursorPos(&pt);
-    std.debug.print("Fallback to cursor position: {}, {}\n", .{ pt.x, pt.y });
+    // Try to find controls within the window
+    const edit_control = common.FindWindowExA(foreground_hwnd.?, null, "Edit\x00", null);
+    if (edit_control != null) {
+        var control_rect: common.RECT = undefined;
+        if (common.GetWindowRect(edit_control.?, &control_rect) != 0) {
+            // Position at the bottom of the control
+            pt.x = control_rect.left + 10;
+            pt.y = control_rect.bottom + 5;
+            std.debug.print("Using Edit control position: {}, {}\n", .{ pt.x, pt.y });
+            return pt;
+        }
+    }
+
+    // Finally, position relative to foreground window
+    var window_rect: common.RECT = undefined;
+    if (common.GetWindowRect(foreground_hwnd.?, &window_rect) != 0) {
+        // Position in the middle-left of the window
+        pt.x = window_rect.left + 100;
+        pt.y = window_rect.top + @divTrunc(window_rect.bottom - window_rect.top, 2);
+        std.debug.print("Using window position: {}, {}\n", .{ pt.x, pt.y });
+        return pt;
+    }
+
+    // Last resort: fixed position on screen
+    pt.x = 100;
+    pt.y = 100;
+    std.debug.print("Using fixed fallback position\n", .{});
     return pt;
 }
 

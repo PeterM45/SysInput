@@ -377,3 +377,118 @@ pub extern "user32" fn GetWindowRect(
     hWnd: HWND,
     lpRect: *RECT,
 ) callconv(.C) BOOL;
+
+// GUI Thread Info constants
+pub const GUITHREADINFO = extern struct {
+    cbSize: DWORD,
+    flags: DWORD,
+    hwndActive: ?HWND,
+    hwndFocus: ?HWND,
+    hwndCapture: ?HWND,
+    hwndMenuOwner: ?HWND,
+    hwndMoveSize: ?HWND,
+    hwndCaret: ?HWND,
+    rcCaret: RECT,
+};
+
+// Functions for getting GUI thread info
+pub extern "user32" fn GetGUIThreadInfo(
+    idThread: DWORD,
+    pgui: *GUITHREADINFO,
+) callconv(.C) BOOL;
+
+// Add EM_POSFROMCHAR message
+pub const EM_POSFROMCHAR = 0x00D6;
+
+// Clipboard constants
+pub const CF_TEXT = 1;
+pub const GMEM_MOVEABLE = 0x0002;
+
+// Clipboard functions
+pub extern "user32" fn OpenClipboard(hWndNewOwner: ?HWND) callconv(.C) BOOL;
+pub extern "user32" fn CloseClipboard() callconv(.C) BOOL;
+pub extern "user32" fn EmptyClipboard() callconv(.C) BOOL;
+pub extern "user32" fn SetClipboardData(uFormat: UINT, hMem: ?HANDLE) callconv(.C) ?HANDLE;
+pub extern "user32" fn GetClipboardData(uFormat: UINT) callconv(.C) ?HANDLE;
+
+// Global memory functions
+pub extern "kernel32" fn GlobalAlloc(uFlags: UINT, dwBytes: usize) callconv(.C) ?HANDLE;
+pub extern "kernel32" fn GlobalLock(hMem: HANDLE) callconv(.C) ?*anyopaque;
+pub extern "kernel32" fn GlobalUnlock(hMem: HANDLE) callconv(.C) BOOL;
+pub extern "kernel32" fn GlobalFree(hMem: HANDLE) callconv(.C) HANDLE;
+
+// String functions
+pub extern "kernel32" fn lstrlenA(lpString: ?*const anyopaque) callconv(.C) c_int;
+
+// Additional windows messages
+pub const WM_PASTE = 0x0302;
+
+// Sleep function
+pub extern "kernel32" fn Sleep(dwMilliseconds: DWORD) callconv(.C) void;
+
+// SetForegroundWindow
+pub extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(.C) BOOL;
+
+// Get thread/process functions
+pub extern "user32" fn GetWindowThreadProcessId(
+    hWnd: HWND,
+    lpdwProcessId: ?*DWORD,
+) callconv(.C) DWORD;
+
+// Window finding functions
+pub extern "user32" fn FindWindowExA(
+    hWndParent: ?HWND,
+    hWndChildAfter: ?HWND,
+    lpszClass: [*:0]const u8,
+    lpszWindow: ?[*:0]const u8,
+) callconv(.C) ?HWND;
+
+pub extern "user32" fn GetActiveWindow() callconv(.C) ?HWND;
+
+// Input simulation
+pub const INPUT_KEYBOARD = 1;
+pub const KEYEVENTF_KEYUP = 0x0002;
+pub const KEYEVENTF_UNICODE = 0x0004;
+
+// Input structure definitions
+pub const KEYBDINPUT = extern struct {
+    wVk: WORD,
+    wScan: WORD,
+    dwFlags: DWORD,
+    time: DWORD,
+    dwExtraInfo: usize,
+    padding1: DWORD,
+    padding2: DWORD,
+};
+
+pub const MOUSEINPUT = extern struct {
+    dx: LONG,
+    dy: LONG,
+    mouseData: DWORD,
+    dwFlags: DWORD,
+    time: DWORD,
+    dwExtraInfo: usize,
+};
+
+pub const HARDWAREINPUT = extern struct {
+    uMsg: DWORD,
+    wParamL: WORD,
+    wParamH: WORD,
+};
+
+pub const INPUT = extern struct {
+    type: DWORD,
+    // Zig doesn't support C unions directly, so we use the largest member
+    // and access the different fields depending on the type
+    ki: KEYBDINPUT,
+};
+
+// Additional input types
+pub const WORD = u16;
+
+// Function declarations
+pub extern "user32" fn SendInput(
+    cInputs: UINT,
+    pInputs: *const INPUT,
+    cbSize: c_int,
+) callconv(.C) UINT;

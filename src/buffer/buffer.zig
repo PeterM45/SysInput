@@ -186,7 +186,17 @@ pub const TextBuffer = struct {
             end += 1;
         }
 
-        return self.content[start..end];
+        // Validate the word - check for null bytes or other issues
+        const word = self.content[start..end];
+        for (word) |c| {
+            if (c == 0 or !std.ascii.isPrint(c)) {
+                // Found a null or non-printable character
+                std.debug.print("Warning: Found invalid character in word\n", .{});
+                return "";
+            }
+        }
+
+        return word;
     }
 
     /// Clear the buffer
@@ -198,8 +208,8 @@ pub const TextBuffer = struct {
 
 /// Check if a character is part of a word
 fn isWordChar(c: u8) bool {
-    // Only include letters, numbers, underscore, and apostrophe (for contractions)
-    return std.ascii.isAlphanumeric(c) or c == '_' or c == '\'';
+    // Make sure character is valid ASCII and is alphanumeric or apostrophe
+    return c != 0 and std.ascii.isPrint(c) and (std.ascii.isAlphanumeric(c) or c == '_' or c == '\'');
 }
 
 /// Text buffer manager to handle multiple text fields across applications
