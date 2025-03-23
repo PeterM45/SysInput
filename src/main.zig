@@ -1,8 +1,11 @@
 const std = @import("std");
 const win32 = @import("win32/hook.zig");
+const common = @import("win32/common.zig");
 const buffer = @import("buffer/buffer.zig");
 const detection = @import("detection/text_field.zig");
 const spellcheck = @import("spellcheck/spellchecker.zig");
+const autocomplete = @import("autocomplete/autocomplete.zig");
+const autocomplete_ui = @import("ui/autocomplete_ui.zig");
 
 /// General Purpose Allocator for dynamic memory
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -16,8 +19,17 @@ var text_field_manager: detection.TextFieldManager = undefined;
 /// Global spellchecker
 var spell_checker: spellcheck.SpellChecker = undefined;
 
+/// Global autocompletion engine
+var autocomplete_engine: autocomplete.AutocompleteEngine = undefined;
+
 /// List for storing word suggestions
 var suggestions: std.ArrayList([]const u8) = undefined;
+
+/// Autocompletion suggestions list
+var autocomplete_suggestions: std.ArrayList([]const u8) = undefined;
+
+/// Global UI for autocompletion suggestions
+var autocomplete_ui_manager: autocomplete_ui.AutocompleteUI = undefined;
 
 /// Window timer ID for periodic text field detection
 const TEXT_FIELD_DETECTION_TIMER = 1;
@@ -37,12 +49,55 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
 
         // Only process keydown events
         if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
+            // Check if autocomplete UI is visible for navigation keys
+            if (autocomplete_ui_manager.is_visible and
+                (kbd.vkCode == win32.VK_UP or
+                    kbd.vkCode == win32.VK_DOWN or
+                    kbd.vkCode == win32.VK_TAB or
+                    kbd.vkCode == win32.VK_RETURN))
+            {
+                // Handle navigation keys for autocomplete
+                switch (kbd.vkCode) {
+                    win32.VK_UP => {
+                        // Move to previous suggestion
+                        const new_index = if (autocomplete_ui_manager.selected_index <= 0)
+                            @as(i32, @intCast(autocomplete_suggestions.items.len - 1))
+                        else
+                            autocomplete_ui_manager.selected_index - 1;
+
+                        autocomplete_ui_manager.selectSuggestion(new_index);
+                        return 1; // Prevent default handling
+                    },
+                    win32.VK_DOWN, win32.VK_TAB => {
+                        // Move to next suggestion
+                        const new_index = if (autocomplete_ui_manager.selected_index >= autocomplete_suggestions.items.len - 1)
+                            0
+                        else
+                            autocomplete_ui_manager.selected_index + 1;
+
+                        autocomplete_ui_manager.selectSuggestion(new_index);
+                        return 1; // Prevent default handling
+                    },
+                    win32.VK_RETURN => {
+                        // Select current suggestion
+                        if (autocomplete_ui_manager.selected_index >= 0) {
+                            const selected = autocomplete_suggestions.items[@intCast(autocomplete_ui_manager.selected_index)];
+                            handleSuggestionSelection(selected);
+                            autocomplete_ui_manager.hideSuggestions();
+                            return 1; // Prevent default handling
+                        }
+                    },
+                    else => {},
+                }
+            }
+
             // Limit processing to printable characters and specific control keys
             const is_control_key =
                 kbd.vkCode == win32.VK_ESCAPE or
                 kbd.vkCode == win32.VK_BACK or
                 kbd.vkCode == win32.VK_DELETE or
-                kbd.vkCode == win32.VK_RETURN;
+                kbd.vkCode == win32.VK_RETURN or
+                kbd.vkCode == win32.VK_TAB;
 
             const is_printable = kbd.vkCode >= 0x20 and kbd.vkCode <= 0x7E;
 
@@ -74,6 +129,9 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                         std.debug.print("Return key error: {}\n", .{err});
                     };
                     syncTextFieldWithBuffer();
+                } else if (kbd.vkCode == win32.VK_TAB) {
+                    // Tab key might indicate focus change - detect text field
+                    detectActiveTextField();
                 } else if (is_printable) {
                     // ASCII character input
                     const char: u8 = @truncate(kbd.vkCode);
@@ -94,7 +152,6 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
     return win32.CallNextHookEx(null, nCode, wParam, lParam);
 }
 
-/// Debug function to print the current buffer state
 fn printBufferState() void {
     const content = buffer_manager.getCurrentText();
     std.debug.print("Buffer: \"{s}\" (len: {})\n", .{ content, content.len });
@@ -104,6 +161,57 @@ fn printBufferState() void {
         return;
     };
     std.debug.print("Current word: \"{s}\"\n", .{word});
+
+    // Process the text through the autocompletion engine
+    autocomplete_engine.processText(content) catch |err| {
+        std.debug.print("Error processing text for autocompletion: {}\n", .{err});
+    };
+
+    // Set the current word for autocompletion
+    autocomplete_engine.setCurrentWord(word);
+
+    // Get autocompletion suggestions
+    autocomplete_suggestions.clearRetainingCapacity();
+    autocomplete_engine.getSuggestions(&autocomplete_suggestions) catch |err| {
+        std.debug.print("Error getting autocompletion suggestions: {}\n", .{err});
+    };
+
+    // Show autocompletion UI if we have suggestions and the word is at least 2 characters
+    if (autocomplete_suggestions.items.len > 0 and word.len >= 2) {
+        std.debug.print("Autocompletion suggestions: ", .{});
+        for (autocomplete_suggestions.items, 0..) |suggestion, i| {
+            if (i > 0) std.debug.print(", ", .{});
+            std.debug.print("\"{s}\"", .{suggestion});
+        }
+        std.debug.print("\n", .{});
+
+        // Get cursor position for showing UI
+        var cursor_pos: common.POINT = undefined;
+        if (common.GetCursorPos(&cursor_pos) != 0) {
+            // Get better position information from the text field manager if possible
+            if (text_field_manager.has_active_field) {
+                // Try to get caret position from the text field (hypothetical function)
+                // This would ideally come from the text_field_manager
+                // But for now we'll just use the mouse position with a small vertical offset
+
+                // Position the suggestions just below the cursor line
+                const font_height = 20; // Approximate font height
+
+                // Show suggestions UI just below the cursor (position it relative to the cursor)
+                autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, cursor_pos.x, cursor_pos.y + font_height) catch |err| {
+                    std.debug.print("Error showing suggestions UI: {}\n", .{err});
+                };
+            } else {
+                // Fall back to just using cursor position
+                autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, cursor_pos.x, cursor_pos.y + 20) catch |err| {
+                    std.debug.print("Error showing suggestions UI: {}\n", .{err});
+                };
+            }
+        }
+    } else if (word.len < 2) {
+        // Hide UI if word is too short
+        autocomplete_ui_manager.hideSuggestions();
+    }
 
     // Only perform spell checking if the word is at least 2 characters
     if (word.len >= 2) {
@@ -212,6 +320,52 @@ fn insertTestString() void {
     syncTextFieldWithBuffer();
 }
 
+/// Handle suggestion selection from the autocomplete UI
+fn handleSuggestionSelection(suggestion: []const u8) void {
+    // Get the current word being typed
+    const current_word = buffer_manager.getCurrentWord() catch {
+        std.debug.print("Error getting current word\n", .{});
+        return;
+    };
+
+    // If there's a current word, replace it with the suggestion
+    if (current_word.len > 0) {
+        std.debug.print("Replacing word \"{s}\" with suggestion \"{s}\"\n", .{ current_word, suggestion });
+
+        // First delete the current word by backspacing
+        var i: usize = 0;
+        while (i < current_word.len) : (i += 1) {
+            buffer_manager.processBackspace() catch |err| {
+                std.debug.print("Backspace error: {}\n", .{err});
+                return;
+            };
+        }
+
+        // Then insert the suggestion
+        buffer_manager.insertString(suggestion) catch |err| {
+            std.debug.print("Suggestion insertion error: {}\n", .{err});
+            return;
+        };
+
+        // Add a space after the suggestion by inserting a string with a space
+        // (replacing the insertChar which doesn't exist)
+        buffer_manager.insertString(" ") catch |err| {
+            std.debug.print("Space insertion error: {}\n", .{err});
+        };
+
+        // Sync with text field
+        syncTextFieldWithBuffer();
+
+        // Add the word to the autocompletion engine
+        autocomplete_engine.completeWord(suggestion) catch |err| {
+            std.debug.print("Error adding word to autocompletion: {}\n", .{err});
+        };
+
+        // Hide the suggestions UI
+        autocomplete_ui_manager.hideSuggestions();
+    }
+}
+
 pub fn main() !void {
     // Initialize memory allocator
     defer _ = gpa.deinit();
@@ -235,6 +389,27 @@ pub fn main() !void {
         }
         suggestions.deinit();
     }
+
+    // Initialize the autocompletion engine
+    autocomplete_engine = try autocomplete.AutocompleteEngine.init(allocator, &spell_checker.dictionary);
+    defer autocomplete_engine.deinit();
+
+    // Initialize autocompletion suggestions list
+    autocomplete_suggestions = std.ArrayList([]const u8).init(allocator);
+    defer {
+        for (autocomplete_suggestions.items) |item| {
+            allocator.free(item);
+        }
+        autocomplete_suggestions.deinit();
+    }
+
+    // Initialize the autocompletion UI
+    const hInstance = win32.GetModuleHandleA(null);
+    autocomplete_ui_manager = try autocomplete_ui.AutocompleteUI.init(allocator, hInstance);
+    defer autocomplete_ui_manager.deinit();
+
+    // Set up the selection callback
+    autocomplete_ui_manager.setSelectionCallback(handleSuggestionSelection);
 
     std.debug.print("Starting SysInput...\n", .{});
 
@@ -269,7 +444,7 @@ test "basic buffer operations" {
     try std.testing.expectEqualStrings("Hello", test_buffer.getCurrentText());
 
     // Test character insertion
-    try test_buffer.insertChar(' ');
+    try test_buffer.insertString(" "); // Using insertString instead of insertChar
     try test_buffer.insertString("World");
     try std.testing.expectEqualStrings("Hello World", test_buffer.getCurrentText());
 
