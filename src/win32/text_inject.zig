@@ -326,12 +326,12 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
 
                 // Set clipboard data
                 if (api.SetClipboardData(api.CF_TEXT, handle) == null) {
-                    _ = api.GlobalFree(handle);
+                    _ = api.GlobalFree(handle.?);
                     _ = api.CloseClipboard();
                     return false;
                 }
             } else {
-                _ = api.GlobalFree(handle);
+                _ = api.GlobalFree(handle.?);
                 _ = api.CloseClipboard();
                 return false;
             }
@@ -363,7 +363,7 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
 
                         _ = api.SetClipboardData(api.CF_TEXT, restore_handle);
                     } else {
-                        _ = api.GlobalFree(restore_handle);
+                        _ = api.GlobalFree(restore_handle.?);
                     }
                 }
 

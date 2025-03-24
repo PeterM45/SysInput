@@ -68,28 +68,6 @@ pub fn init(allocator: std.mem.Allocator, module_instance: anytype) !void {
     autocomplete_ui_manager.setSelectionCallback(handleSuggestionSelection);
 }
 
-/// Deinitialize components
-pub fn deinit() void {
-    // Free resources
-    for (suggestions.items) |item| {
-        gpa_allocator.free(item);
-    }
-    suggestions.deinit();
-
-    for (autocomplete_suggestions.items) |item| {
-        gpa_allocator.free(item);
-    }
-    autocomplete_suggestions.deinit();
-
-    if (last_word_processed.len > 0) {
-        gpa_allocator.free(last_word_processed);
-    }
-
-    spell_checker.deinit();
-    autocomplete_engine.deinit();
-    autocomplete_ui_manager.deinit();
-}
-
 /// Process a text for autocomplete suggestions
 pub fn processTextForSuggestions(text: []const u8) !void {
     try autocomplete_engine.processText(text);
@@ -146,6 +124,16 @@ pub fn getSpellingSuggestions(word: []const u8) !void {
 
 /// Show suggestions in UI
 pub fn showSuggestions(current_text: []const u8, current_word: []const u8, x: i32, y: i32) !void {
+    debug.debugPrint("Handler showSuggestions called with word '{s}'\n", .{current_word});
+    debug.debugPrint("Have {d} suggestions to display\n", .{autocomplete_suggestions.items.len});
+
+    // Print first few suggestions
+    for (autocomplete_suggestions.items, 0..) |sugg, i| {
+        if (i < 5) {
+            debug.debugPrint("  Suggestion {d}: '{s}'\n", .{ i, sugg });
+        }
+    }
+
     if (autocomplete_suggestions.items.len > 0 and current_word.len >= 2) {
         // Set context
         autocomplete_ui_manager.setTextContext(current_text, current_word);
@@ -156,6 +144,7 @@ pub fn showSuggestions(current_text: []const u8, current_word: []const u8, x: i3
         // Update stats
         stats.total_shown += 1;
     } else {
+        debug.debugPrint("No suggestions to show (word len: {d})\n", .{current_word.len});
         hideSuggestions();
     }
 }
@@ -171,137 +160,172 @@ pub fn updateSuggestionPosition() void {
     }
 }
 
-/// Hide suggestions UI
-pub fn hideSuggestions() void {
-    autocomplete_ui_manager.hideSuggestions();
-}
-
 /// Enhanced suggestion word replacement that tries multiple methods
+/// Returns true if successful
 pub fn replaceSuggestionWord(current_word: []const u8, suggestion: []const u8) bool {
     debug.debugPrint("Replacing word '{s}' with '{s}'\n", .{ current_word, suggestion });
 
-    // Keep track of attempts
+    // Skip if no word to replace
+    if (current_word.len == 0) {
+        debug.debugPrint("No current word to replace\n", .{});
+        return false;
+    }
+
+    // Track metrics and timing
     stats.insertion_attempts += 1;
+    const start_time = std.time.milliTimestamp();
 
     // Get focus window for class detection
-    const focus_hwnd = api.GetFocus();
+    const focus_hwnd = api.getFocus();
     var success = false;
 
+    // Try application-specific methods first
     if (focus_hwnd != null) {
-        var class_name: [64]u8 = [_]u8{0} ** 64;
-        const class_ptr: [*:0]u8 = @ptrCast(&class_name);
-        const class_len = api.GetClassNameA(focus_hwnd.?, class_ptr, 64);
+        debug.debugPrint("Focus window: 0x{x}\n", .{@intFromPtr(focus_hwnd.?)});
 
-        var class_slice: []const u8 = "";
-        if (class_len > 0) {
-            class_slice = class_name[0..@intCast(class_len)];
-            debug.debugPrint("Replacing in window class: {s}\n", .{class_slice});
+        const class_name = api.safeGetClassName(focus_hwnd) catch {
+            debug.debugPrint("Failed to get class name\n", .{});
+            return false;
+        };
+
+        // Check parent window too
+        const parent_hwnd = api.getParent(focus_hwnd.?);
+        if (parent_hwnd != null) {
+            const parent_class = api.safeGetClassName(parent_hwnd) catch "";
+            debug.debugPrint("Parent window class: '{s}'\n", .{parent_class});
         }
 
-        // Add special handling for Notepad
-        if (std.mem.eql(u8, class_slice, "Notepad") or std.mem.eql(u8, class_slice, "Edit")) {
-            // For Notepad, first try a direct selection approach
-            debug.debugPrint("Using Notepad-specific replacement method\n", .{});
+        debug.debugPrint("Window class detected: '{s}'\n", .{class_name});
 
-            // Get cursor selection
-            const selection = api.SendMessageA(focus_hwnd.?, api.EM_GETSEL, 0, 0);
-            const sel_u64: u64 = @bitCast(selection);
-            const sel_end: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
+        // Notepad and standard edit controls
+        if (std.mem.eql(u8, class_name, "Notepad") or std.mem.eql(u8, class_name, "Edit")) {
+            debug.debugPrint("Detected Notepad/Edit control!\n", .{});
+            // METHOD 1: Try direct key injection first (most reliable in Notepad)
+            debug.debugPrint("Using key simulation for Notepad\n", .{});
 
-            // Calculate where the word should start
-            const start_pos = if (sel_end >= current_word.len)
-                sel_end - current_word.len
-            else
-                0;
+            // Set window to foreground to ensure it receives input
+            _ = api.setForegroundWindow(focus_hwnd.?);
 
-            debug.debugPrint("Selecting word from position {d} to {d}\n", .{ start_pos, sel_end });
+            // 1. Delete the current word with backspace
+            for (0..current_word.len) |_| {
+                // Send backspace character by character
+                var input: api.INPUT = undefined;
+                input.type = api.INPUT_KEYBOARD;
+                input.ki.wVk = api.VK_BACK;
+                input.ki.wScan = 0;
+                input.ki.dwFlags = 0; // Key down
+                input.ki.time = 0;
+                input.ki.dwExtraInfo = 0;
+                _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
 
-            // Explicitly select the word
-            const start_wp: api.WPARAM = @intCast(start_pos);
-            const end_lp: api.LPARAM = @intCast(sel_end);
-            _ = api.SendMessageA(focus_hwnd.?, api.EM_SETSEL, start_wp, end_lp);
+                // Key up
+                input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+                _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
 
-            // Wait briefly for selection to take effect
-            api.Sleep(10);
+                api.sleep(5); // Short delay between keys
+            }
 
-            // Create buffer with null terminator for the replacement
-            const buffer = std.heap.page_allocator.allocSentinel(u8, suggestion.len, 0) catch {
-                debug.debugPrint("Failed to allocate buffer\n", .{});
-                return false;
-            };
-            defer std.heap.page_allocator.free(buffer);
+            // 2. Insert the suggestion character by character
+            for (suggestion) |c| {
+                // Send character using unicode method
+                var input: api.INPUT = undefined;
+                input.type = api.INPUT_KEYBOARD;
+                input.ki.wVk = 0;
+                input.ki.wScan = c;
+                input.ki.dwFlags = api.KEYEVENTF_UNICODE;
+                input.ki.time = 0;
+                input.ki.dwExtraInfo = 0;
+                _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
 
-            @memcpy(buffer, suggestion);
+                // Key up
+                input.ki.dwFlags = api.KEYEVENTF_UNICODE | api.KEYEVENTF_KEYUP;
+                _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
 
-            // Try replacing the selection
-            const ptr_value: usize = @intFromPtr(buffer.ptr);
-            const result = api.SendMessageA(focus_hwnd.?, api.EM_REPLACESEL, 1, @as(api.LPARAM, @intCast(ptr_value)));
+                api.sleep(5); // Short delay between keys
+            }
 
-            if (result != 0) {
-                // Add a space
-                var space_buffer = std.heap.page_allocator.allocSentinel(u8, 1, 0) catch {
-                    return false;
-                };
-                defer std.heap.page_allocator.free(space_buffer);
-                space_buffer[0] = ' ';
+            // 3. Insert a space
+            var space_input: api.INPUT = undefined;
+            space_input.type = api.INPUT_KEYBOARD;
+            space_input.ki.wVk = api.VK_SPACE;
+            space_input.ki.wScan = 0;
+            space_input.ki.dwFlags = 0;
+            space_input.ki.time = 0;
+            space_input.ki.dwExtraInfo = 0;
+            _ = api.sendInput(1, &space_input, @sizeOf(api.INPUT));
 
-                const space_ptr: usize = @intFromPtr(space_buffer.ptr);
-                _ = api.SendMessageA(focus_hwnd.?, api.EM_REPLACESEL, 1, @as(api.LPARAM, @intCast(space_ptr)));
+            // Key up
+            space_input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+            _ = api.sendInput(1, &space_input, @sizeOf(api.INPUT));
 
-                // Resync our buffer
-                resyncBufferWithTextField();
+            // 4. Update buffer manually
+            resyncBufferWithTextField();
 
-                // Add word to autocomplete engine
-                autocomplete_engine.completeWord(suggestion) catch {};
+            // Add to autocomplete
+            autocomplete_engine.completeWord(suggestion) catch {};
 
-                debug.debugPrint("Notepad direct replacement succeeded\n", .{});
+            debug.debugPrint("Key simulation succeeded\n", .{});
+            success = true;
+
+            // If key simulation succeeded, don't try other methods
+            if (success) {
                 stats.insertion_success += 1;
+                const elapsed = std.time.milliTimestamp() - start_time;
+                debug.debugPrint("Word replacement succeeded after {d}ms\n", .{elapsed});
                 return true;
             }
 
-            debug.debugPrint("Notepad direct replacement failed\n", .{});
+            // If simulation fails, fall through to other methods
+            debug.debugPrint("Key simulation failed, trying other methods\n", .{});
+        }
+        // Browser fields
+        else if (std.mem.startsWith(u8, class_name, "Chrome_") or
+            std.mem.eql(u8, class_name, "MozillaWindowClass"))
+        {
+            success = tryBrowserSpecificReplacement(focus_hwnd.?, current_word, suggestion);
+        }
+        // Rich edit controls
+        else if (std.mem.startsWith(u8, class_name, "RICH")) {
+            success = tryRichEditReplacement(focus_hwnd.?, current_word, suggestion);
         }
 
-        // METHOD 1: Try direct text injection using selection approach
-        if (buffer_controller.hasActiveTextField()) {
-            if (trySelectCurrentWord(focus_hwnd.?, current_word)) {
-                // Try direct insertion of the suggestion
-                if (text_inject.insertTextAsSelection(focus_hwnd.?, suggestion)) {
-                    // Add a space using the same method
-                    _ = text_inject.insertTextAsSelection(focus_hwnd.?, " ");
+        // If application-specific methods failed, try general methods
+        if (!success) {
+            // Try direct text injection using selection approach
+            if (buffer_controller.hasActiveTextField()) {
+                // Make multiple attempts to select the word
+                var select_attempts: u8 = 0;
+                while (select_attempts < 2) : (select_attempts += 1) {
+                    if (trySelectCurrentWord(focus_hwnd.?, current_word)) {
+                        // Try direct insertion of the suggestion
+                        if (text_inject.insertTextAsSelection(focus_hwnd.?, suggestion)) {
+                            // Add a space using the same method
+                            _ = text_inject.insertTextAsSelection(focus_hwnd.?, " ");
 
-                    // Resync our buffer with the field
-                    resyncBufferWithTextField();
+                            // Short delay to allow application to process the changes
+                            api.sleep(20);
 
-                    // Add to autocomplete engine
-                    autocomplete_engine.completeWord(suggestion) catch |err| {
-                        debug.debugPrint("Error adding word to autocomplete: {}\n", .{err});
-                    };
+                            // Resync buffer with text field
+                            resyncBufferWithTextField();
 
-                    debug.debugPrint("Direct text injection succeeded\n", .{});
-                    stats.insertion_success += 1;
-                    success = true;
+                            debug.debugPrint("Direct text injection succeeded\n", .{});
+                            success = true;
+                            break;
+                        }
+                    }
+
+                    // Brief delay before retry
+                    if (select_attempts == 0) {
+                        api.sleep(30);
+                    }
                 }
             }
         }
-
-        // If direct injection failed, try application-specific methods
-
-        if (!success) {
-            // Special handling for particular application classes
-            if (std.mem.eql(u8, class_slice, "Chrome_WidgetWin_1") or
-                std.mem.eql(u8, class_slice, "MozillaWindowClass"))
-            {
-                // Browser text fields often work better with clipboard method
-                success = tryBrowserSpecificReplacement(focus_hwnd.?, current_word, suggestion);
-            } else if (std.mem.startsWith(u8, class_slice, "RICHEDIT")) {
-                // Rich edit controls need special handling
-                success = tryRichEditReplacement(focus_hwnd.?, current_word, suggestion);
-            }
-        }
+    } else {
+        debug.debugPrint("Not a Notepad/Edit window\n", .{});
     }
 
-    // METHOD 2: Try backspace-and-type approach as fallback if all else failed
+    // Fallback to backspace-and-type approach
     if (!success) {
         debug.debugPrint("Using backspace-and-type approach\n", .{});
 
@@ -331,15 +355,142 @@ pub fn replaceSuggestionWord(current_word: []const u8, suggestion: []const u8) b
         };
 
         debug.debugPrint("Backspace-and-type approach succeeded\n", .{});
-        stats.insertion_success += 1;
         success = true;
+    }
+
+    // Update metrics
+    if (success) {
+        stats.insertion_success += 1;
     }
 
     // Calculate success rate
     stats.insertion_success_rate = @as(f32, @floatFromInt(stats.insertion_success)) /
         @as(f32, @floatFromInt(stats.insertion_attempts));
 
+    const elapsed = std.time.milliTimestamp() - start_time;
+    debug.debugPrint("Word replacement {s} after {d}ms\n", .{ if (success) "succeeded" else "failed", elapsed });
+
     return success;
+}
+
+/// Handle suggestion selection from the autocomplete UI
+pub fn handleSuggestionSelection(suggestion: []const u8) void {
+    // Get the current word being typed
+    debug.debugPrint("Handling suggestion selection for: '{s}'\n", .{suggestion});
+
+    const current_word = buffer_controller.getCurrentWord() catch {
+        debug.debugPrint("Error getting current word\n", .{});
+        return;
+    };
+
+    // If there's a current word, replace it with the suggestion
+    if (current_word.len > 0) {
+        debug.debugPrint("Current word: '{s}'\n", .{current_word});
+
+        // Simply call replaceSuggestionWord which contains all the logic
+        if (replaceSuggestionWord(current_word, suggestion)) {
+            // Update stats
+            stats.accepted += 1;
+        }
+    }
+}
+
+/// Accept the current suggestion
+pub fn acceptCurrentSuggestion() void {
+    if (autocomplete_ui_manager.is_visible and
+        autocomplete_ui_manager.current_suggestion != null)
+    {
+        const suggestion = autocomplete_ui_manager.current_suggestion.?;
+        debug.debugPrint("Accepting current suggestion: '{s}'\n", .{suggestion});
+
+        // Get the current word
+        const current_word = buffer_controller.getCurrentWord() catch {
+            debug.debugPrint("Error getting current word\n", .{});
+            return;
+        };
+
+        // Get focus window for direct manipulation
+        const focus_hwnd = api.getFocus();
+        if (focus_hwnd != null) {
+            const class_name = api.safeGetClassName(focus_hwnd) catch "";
+            debug.debugPrint("Window class for completion: '{s}'\n", .{class_name});
+
+            // Direct fix for Notepad - bypass all other functions
+            if (std.mem.eql(u8, class_name, "Notepad") or std.mem.eql(u8, class_name, "Edit")) {
+                debug.debugPrint("Using direct key simulation for Notepad\n", .{});
+
+                // Ensure the window is in foreground
+                _ = api.setForegroundWindow(focus_hwnd.?);
+
+                // 1. Delete the current word with backspace
+                for (0..current_word.len) |_| {
+                    var input: api.INPUT = undefined;
+                    input.type = api.INPUT_KEYBOARD;
+                    input.ki.wVk = api.VK_BACK;
+                    input.ki.wScan = 0;
+                    input.ki.dwFlags = 0;
+                    input.ki.time = 0;
+                    input.ki.dwExtraInfo = 0;
+                    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+                    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+                    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+                    api.sleep(5);
+                }
+
+                // 2. Insert the suggestion character by character
+                for (suggestion) |c| {
+                    var input: api.INPUT = undefined;
+                    input.type = api.INPUT_KEYBOARD;
+                    input.ki.wVk = 0;
+                    input.ki.wScan = c;
+                    input.ki.dwFlags = api.KEYEVENTF_UNICODE;
+                    input.ki.time = 0;
+                    input.ki.dwExtraInfo = 0;
+                    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+                    input.ki.dwFlags = api.KEYEVENTF_UNICODE | api.KEYEVENTF_KEYUP;
+                    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+                    api.sleep(5);
+                }
+
+                // 3. Add a space
+                var space_input: api.INPUT = undefined;
+                space_input.type = api.INPUT_KEYBOARD;
+                space_input.ki.wVk = api.VK_SPACE;
+                space_input.ki.wScan = 0;
+                space_input.ki.dwFlags = 0;
+                space_input.ki.time = 0;
+                space_input.ki.dwExtraInfo = 0;
+                _ = api.sendInput(1, &space_input, @sizeOf(api.INPUT));
+
+                space_input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+                _ = api.sendInput(1, &space_input, @sizeOf(api.INPUT));
+
+                // 4. Update buffer and statistics
+                resyncBufferWithTextField();
+                autocomplete_engine.completeWord(suggestion) catch {};
+                stats.accepted += 1;
+
+                debug.debugPrint("Direct key simulation completed\n", .{});
+
+                // Hide suggestions and return
+                hideSuggestions();
+                return;
+            }
+        }
+
+        // For other applications, use normal path
+        handleSuggestionSelection(suggestion);
+        hideSuggestions();
+    }
+}
+
+/// Hide suggestions UI
+pub fn hideSuggestions() void {
+    autocomplete_ui_manager.hideSuggestions();
 }
 
 /// Check if a character is part of a word
@@ -364,26 +515,6 @@ fn resyncBufferWithTextField() void {
     buffer_controller.insertString(text) catch |err| {
         debug.debugPrint("Failed to update buffer: {}\n", .{err});
     };
-}
-
-/// Handle suggestion selection from the autocomplete UI
-pub fn handleSuggestionSelection(suggestion: []const u8) void {
-    // Get the current word being typed
-    const current_word = buffer_controller.getCurrentWord() catch {
-        debug.debugPrint("Error getting current word\n", .{});
-        return;
-    };
-
-    // If there's a current word, replace it with the suggestion
-    if (current_word.len > 0) {
-        if (replaceSuggestionWord(current_word, suggestion)) {
-            // Update stats
-            stats.accepted += 1;
-
-            // Hide suggestions after successful selection
-            hideSuggestions();
-        }
-    }
 }
 
 /// Check if suggestions UI is visible
@@ -415,51 +546,101 @@ pub fn navigateToNextSuggestion() void {
     debug.debugPrint("Selected next suggestion (index {})\n", .{new_index});
 }
 
-/// Accept the current suggestion
-pub fn acceptCurrentSuggestion() void {
-    if (autocomplete_ui_manager.is_visible and
-        autocomplete_ui_manager.current_suggestion != null)
-    {
-        const suggestion = autocomplete_ui_manager.current_suggestion.?;
-        debug.debugPrint("Accepting current suggestion: '{s}'\n", .{suggestion});
+/// Special handler for Notepad/Edit completion
+fn handleNotepadCompletion(hwnd: api.HWND, current_word: []const u8, suggestion: []const u8) bool {
+    debug.debugPrint("Using enhanced Notepad completion handler\n", .{});
 
-        // Detect special characters in suggestion that might cause issues
-        var has_special_chars = false;
-        for (suggestion) |c| {
-            if (c < 32 or c > 126) {
-                has_special_chars = true;
-                break;
-            }
+    // APPROACH 1: Precise selection method for Notepad
+
+    // First, get current selection
+    const selection = api.sendMessage(hwnd, api.EM_GETSEL, 0, 0);
+    const sel_u64: u64 = @bitCast(selection);
+    const sel_start: u32 = @truncate(sel_u64 & 0xFFFF);
+    const sel_end: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
+
+    debug.debugPrint("Current selection: {d}-{d}\n", .{ sel_start, sel_end });
+
+    // Calculate positions for word replacement
+    const caret_pos = @max(sel_start, sel_end); // Use the end of selection
+    const word_start = if (caret_pos >= current_word.len)
+        caret_pos - current_word.len
+    else
+        0;
+
+    debug.debugPrint("Calculated word bounds: {d}-{d}\n", .{ word_start, caret_pos });
+
+    // IMPORTANT: Select the word first
+    _ = api.sendMessage(hwnd, api.EM_SETSEL, word_start, caret_pos);
+
+    // Verify selection worked by checking selection again
+    const new_selection = api.sendMessage(hwnd, api.EM_GETSEL, 0, 0);
+    const new_sel_u64: u64 = @bitCast(new_selection);
+    const new_start: u32 = @truncate(new_sel_u64 & 0xFFFF);
+    const new_end: u32 = @truncate((new_sel_u64 >> 16) & 0xFFFF);
+
+    debug.debugPrint("New selection after EM_SETSEL: {d}-{d}\n", .{ new_start, new_end });
+
+    // Only continue if we have a valid selection
+    if (new_start != new_end) {
+        // Create null-terminated buffer for the replacement
+        const buffer = std.heap.page_allocator.allocSentinel(u8, suggestion.len, 0) catch {
+            debug.debugPrint("Failed to allocate buffer for suggestion\n", .{});
+            return false;
+        };
+        defer std.heap.page_allocator.free(buffer);
+
+        @memcpy(buffer, suggestion);
+
+        // Replace the selected text
+        const ptr_value: usize = @intFromPtr(buffer.ptr);
+        const result = api.sendMessage(hwnd, api.EM_REPLACESEL, 1, @as(api.LPARAM, @intCast(ptr_value)));
+
+        if (result != 0) {
+            // Add a space after the suggestion
+            var space_buffer = std.heap.page_allocator.allocSentinel(u8, 1, 0) catch {
+                return false;
+            };
+            defer std.heap.page_allocator.free(space_buffer);
+            space_buffer[0] = ' ';
+
+            const space_ptr: usize = @intFromPtr(space_buffer.ptr);
+            _ = api.sendMessage(hwnd, api.EM_REPLACESEL, 1, @as(api.LPARAM, @intCast(space_ptr)));
+
+            // Resync our buffer with the edited text
+            resyncBufferWithTextField();
+
+            // Add the word to the autocomplete engine's vocabulary
+            autocomplete_engine.completeWord(suggestion) catch |err| {
+                debug.debugPrint("Error adding to vocabulary: {}\n", .{err});
+            };
+
+            debug.debugPrint("Notepad direct replacement succeeded\n", .{});
+            return true;
+        } else {
+            debug.debugPrint("EM_REPLACESEL failed\n", .{});
         }
-
-        // Use resilient method for special characters
-        if (has_special_chars) {
-            debug.debugPrint("Suggestion contains special characters - using robust insertion\n", .{});
-
-            // Get the current word first
-            const current_word = buffer_controller.getCurrentWord() catch "";
-
-            // Replace directly through buffer controller to avoid character issues
-            if (current_word.len > 0) {
-                // Delete the current word
-                var i: usize = 0;
-                while (i < current_word.len) : (i += 1) {
-                    buffer_controller.processBackspace() catch {};
-                }
-
-                // Insert the suggestion
-                buffer_controller.insertString(suggestion) catch {};
-                buffer_controller.insertString(" ") catch {};
-
-                // Hide suggestions
-                hideSuggestions();
-                return;
-            }
-        }
-
-        // Standard case: use the callback
-        handleSuggestionSelection(suggestion);
+    } else {
+        debug.debugPrint("Failed to select text range\n", .{});
     }
+
+    // APPROACH 2: Try clipboard approach if direct selection failed
+    debug.debugPrint("Trying clipboard approach for Notepad\n", .{});
+
+    // First select the current word precisely
+    const word_len: api.DWORD = @intCast(current_word.len);
+    const actual_start = if (sel_end >= word_len) sel_end - word_len else 0;
+    _ = api.sendMessage(hwnd, api.EM_SETSEL, actual_start, sel_end);
+
+    // Now try clipboard insertion
+    if (text_inject.insertViaClipboard(hwnd, suggestion)) {
+        // Add space
+        _ = text_inject.insertViaClipboard(hwnd, " ");
+        // Resync buffer
+        resyncBufferWithTextField();
+        return true;
+    }
+
+    return false;
 }
 
 /// Get selected suggestion index
@@ -590,137 +771,115 @@ fn simulateKeyPress(vk: u8, is_down: bool) void {
     _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
 }
 
-/// Try to find and select the current word in the text field
+/// Try selecting the current word in the text field
 fn trySelectCurrentWord(hwnd: api.HWND, word: []const u8) bool {
     // METHOD 1: Use selection information
-    const selection = api.SendMessageA(hwnd, api.EM_GETSEL, 0, 0);
+    const selection = api.sendMessage(hwnd, api.EM_GETSEL, 0, 0);
     const sel_u64: u64 = @bitCast(selection);
     const sel_start: u32 = @truncate(sel_u64 & 0xFFFF);
     const sel_end: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
 
-    // If we have a valid selection
-    if (sel_start <= sel_end) {
-        // If selection is a point (cursor), find word boundaries
-        if (sel_start == sel_end) {
-            // Get the text around this position
-            const text_length = api.SendMessageA(hwnd, api.WM_GETTEXTLENGTH, 0, 0);
-            if (text_length > 0) {
-                const buffer_size = @min(text_length + 1, 4096);
-                var text_buffer = std.heap.page_allocator.allocSentinel(u8, @intCast(buffer_size), 0) catch {
-                    return false;
-                };
-                defer std.heap.page_allocator.free(text_buffer);
+    debug.debugPrint("Current selection: {}-{}\n", .{ sel_start, sel_end });
 
-                const text_ptr: usize = @intFromPtr(text_buffer.ptr);
-                const buffer_size_u: usize = @intCast(buffer_size);
-                const text_result = api.SendMessageA(hwnd, api.WM_GETTEXT, buffer_size_u, @intCast(text_ptr));
+    // Use the caret position to estimate word boundaries
+    if (sel_start == sel_end) { // Cursor is a point, not a selection
+        // Calculate where the word should start based on cursor position
+        const caret_pos = sel_end;
+        const word_start = if (caret_pos >= word.len) caret_pos - word.len else 0;
 
-                if (text_result > 0) {
-                    // Try to find boundaries of current word
-                    var word_start = sel_start;
-                    var word_end = sel_end;
+        debug.debugPrint("Selecting word from position {d} to {d}\n", .{ word_start, caret_pos });
 
-                    // Improved: Try both approaches - from cursor backward or look for the
-                    // exact word in surrounding text
+        // Select the range
+        _ = api.sendMessage(hwnd, api.EM_SETSEL, word_start, caret_pos);
 
-                    // Search backward for word start
-                    var found_by_search = false;
-                    if (sel_start > 0) {
-                        var i = sel_start;
-                        while (i > 0) : (i -= 1) {
-                            const c = text_buffer[i - 1];
-                            if (!isWordChar(c)) {
+        // Verify selection
+        const new_selection = api.sendMessage(hwnd, api.EM_GETSEL, 0, 0);
+        const new_sel_u64: u64 = @bitCast(new_selection);
+        const new_start: u32 = @truncate(new_sel_u64 & 0xFFFF);
+        const new_end: u32 = @truncate((new_sel_u64 >> 16) & 0xFFFF);
+
+        // If selection succeeded, we're done
+        if (new_start != new_end) {
+            debug.debugPrint("Selection successful: {}-{}\n", .{ new_start, new_end });
+            return true;
+        }
+    }
+
+    // METHOD 2: Try to find the word in the content
+
+    // For more reliable word location, get the text content
+    const text_length = api.sendMessage(hwnd, api.WM_GETTEXTLENGTH, 0, 0);
+    if (text_length > 0) {
+        const buffer_size = @min(text_length + 1, 4096);
+        const text_buffer = std.heap.page_allocator.allocSentinel(u8, @intCast(buffer_size), 0) catch {
+            return false;
+        };
+        defer std.heap.page_allocator.free(text_buffer);
+
+        const text_ptr: usize = @intFromPtr(text_buffer.ptr);
+        const buffer_size_u: usize = @intCast(buffer_size);
+        const text_result = api.sendMessage(hwnd, api.WM_GETTEXT, buffer_size_u, @intCast(text_ptr));
+
+        if (text_result > 0) {
+            // Look for word near cursor position
+            const cursor_pos = sel_end;
+            const search_start = if (cursor_pos > 100) cursor_pos - 100 else 0;
+            const search_end = @min(cursor_pos + 100, text_result);
+
+            var i: u32 = search_start;
+            while (i < search_end) : (i += 1) {
+                // Check if this position could be the start of our word
+                if (i == 0 or !isWordChar(text_buffer[i - 1])) {
+                    // Check if word matches here
+                    if (i + word.len <= search_end) {
+                        var matches = true;
+                        for (0..word.len) |j| {
+                            if (text_buffer[i + j] != word[j]) {
+                                matches = false;
                                 break;
                             }
-                            word_start = i - 1;
                         }
-                    }
 
-                    // Search forward for word end
-                    if (sel_end < text_result) {
-                        var i = sel_end;
-                        while (i < text_result) : (i += 1) {
-                            const c = text_buffer[i];
-                            if (!isWordChar(c)) {
-                                break;
-                            }
-                            word_end = i + 1;
-                        }
-                    }
-
-                    // Check if we found a word that matches what we're looking for
-                    if (word_end > word_start) {
-                        const found_word = text_buffer[word_start..word_end];
-
-                        // Verify that this is the word we're looking for
-                        if (std.mem.eql(u8, found_word, word)) {
-                            // Select the word
-                            _ = api.SendMessageA(hwnd, api.EM_SETSEL, word_start, word_end);
-                            found_by_search = true;
+                        if (matches) {
+                            // Found the word! Select it
+                            _ = api.sendMessage(hwnd, api.EM_SETSEL, i, @as(api.LPARAM, @intCast(i + word.len)));
+                            debug.debugPrint("Found word at position {}-{}\n", .{ i, i + word.len });
                             return true;
-                        }
-                    }
-
-                    // If we couldn't find by looking at cursor position, search for the word
-                    // in the surrounding text (more reliable for some applications)
-                    if (!found_by_search) {
-                        // Look for the word in the general vicinity of the cursor
-                        const search_start = if (sel_start > 20) sel_start - 20 else 0;
-                        const search_end = if (sel_end + 20 < text_result) sel_end + 20 else text_result;
-                        const search_start_usize: usize = @intCast(search_start);
-                        const search_end_usize: usize = @intCast(search_end);
-                        const search_area = text_buffer[search_start_usize..search_end_usize];
-
-                        var start_pos: ?usize = null;
-                        for (search_area, 0..) |_, i| {
-                            // Check if this is a possible word start
-                            if (i == 0 or !isWordChar(search_area[i - 1])) {
-                                // See if word matches starting here
-                                if (i + word.len <= search_area.len) {
-                                    const possible_match = search_area[i .. i + word.len];
-                                    if (std.mem.eql(u8, possible_match, word)) {
-                                        // Found exact match
-                                        start_pos = search_start + i;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (start_pos) |pos| {
-                            // Found the exact word, select it
-
-                            const pos_wparam: api.WPARAM = @intCast(pos);
-                            const end_pos_lparam: api.LPARAM = @intCast(pos + word.len);
-                            _ = api.SendMessageA(hwnd, api.EM_SETSEL, pos_wparam, end_pos_lparam);
                         }
                     }
                 }
             }
         }
-
-        // If we have a non-empty selection, check if it's the word we're looking for
-        if (sel_end > sel_start) {
-            const selection_length = sel_end - sel_start;
-            if (selection_length == word.len) {
-                // The selection length matches our word, assume it's correct
-                return true;
-            }
-        }
     }
 
-    // METHOD 2: Simple heuristic - just try positioning based on cursor and word length
-    if (sel_start == sel_end) {
-        // Assume the cursor is at the end of the word
-        const estimated_start = if (sel_end >= word.len) sel_end - word.len else 0;
-        _ = api.SendMessageA(hwnd, api.EM_SETSEL, estimated_start, sel_end);
-        return true;
-    }
-
-    return false;
+    // METHOD 3: Simple fallback - use whatever was found
+    _ = api.sendMessage(hwnd, api.EM_SETSEL, sel_start, sel_end);
+    return sel_start != sel_end;
 }
 
 /// Add a word to the autocompletion engine's vocabulary
 pub fn addWordToVocabulary(word: []const u8) !void {
     try autocomplete_engine.addWord(word);
+}
+
+/// Deinitialize components
+pub fn deinit() void {
+    // Free resources
+    for (suggestions.items) |item| {
+        gpa_allocator.free(item);
+    }
+    suggestions.deinit();
+
+    for (autocomplete_suggestions.items) |item| {
+        gpa_allocator.free(item);
+    }
+    autocomplete_suggestions.deinit();
+
+    if (last_word_processed.len > 0) {
+        gpa_allocator.free(last_word_processed);
+    }
+
+    spell_checker.deinit();
+    autocomplete_engine.deinit();
+    autocomplete_ui_manager.deinit();
 }

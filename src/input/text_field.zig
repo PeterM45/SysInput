@@ -5,7 +5,7 @@ const api = sysinput.win32.api;
 const debug = sysinput.core.debug;
 
 // Typical text field window class names
-const TEXT_FIELD_CLASS_NAMES = [_][]const u8{
+pub const TEXT_FIELD_CLASS_NAMES = [_][]const u8{
     "Edit",
     "RichEdit",
     "RichEdit20W",

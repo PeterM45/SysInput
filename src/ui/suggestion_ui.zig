@@ -54,6 +54,8 @@ pub const AutocompleteUI = struct {
 
     /// Process suggestions for the current text
     pub fn showSuggestions(self: *AutocompleteUI, suggestions: [][]const u8, x: i32, y: i32) !void {
+        debug.debugPrint("UI showSuggestions called with {d} suggestions\n", .{suggestions.len});
+
         self.suggestions = suggestions;
         self.selected_index = 0;
         window.g_ui_state.suggestions = suggestions;
@@ -63,6 +65,7 @@ pub const AutocompleteUI = struct {
         if (suggestions.len > 0) {
             self.is_visible = true;
             self.current_suggestion = suggestions[0];
+            debug.debugPrint("First suggestion: '{s}'\n", .{self.current_suggestion.?});
 
             // Try multiple approaches for inline completion
             if (!text_inject.tryDirectCompletion(self.current_word, self.current_suggestion.?)) {

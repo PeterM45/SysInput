@@ -401,34 +401,74 @@ fn storeSuccessfulMethod(class_name: []const u8, mode: SyncMode) void {
 
 /// Try a specific sync method with verification
 fn trySyncMethod(mode: SyncMode, content: []const u8) bool {
-    var success = false;
+    debug.debugPrint("Trying sync method: {s}\n", .{@tagName(mode)});
 
-    switch (mode) {
-        .Normal => {
-            success = tryNormalTextFieldUpdate(content);
-        },
-        .Clipboard => {
-            const focus_hwnd = api.GetFocus() orelse return false;
-            success = text_inject.insertTextAsSelection(focus_hwnd, content);
-        },
-        .Simulation => {
-            success = tryKeySimulation(content);
-            // Give more time for key simulation to complete
-            if (success) api.Sleep(100);
-        },
+    // Skip empty content
+    if (content.len == 0) {
+        debug.debugPrint("Nothing to sync (empty content)\n", .{});
+        return true; // Consider empty content sync as successful
     }
 
-    // Verify success
-    if (success) {
-        success = verifyTextUpdate(content);
-        if (success) {
-            debug.debugPrint("{s} succeeded and verified\n", .{@tagName(mode)});
-        } else {
-            debug.debugPrint("{s} appeared to succeed but failed verification\n", .{@tagName(mode)});
+    // Track execution time for performance analysis
+    const start_time = std.time.milliTimestamp();
+    var success = false;
+
+    // Handle null focus window for clipboard method early
+    if (mode == .Clipboard) {
+        const focus_hwnd = api.GetFocus();
+        if (focus_hwnd == null) {
+            debug.debugPrint("Clipboard method failed: no focus window\n", .{});
+            return false;
+        }
+
+        success = text_inject.insertTextAsSelection(focus_hwnd.?, content);
+    } else {
+        // Execute the appropriate method
+        switch (mode) {
+            .Normal => {
+                success = tryNormalTextFieldUpdate(content);
+            },
+            .Clipboard => {
+                // Already handled above, but keep to avoid incomplete switch error
+                unreachable;
+            },
+            .Simulation => {
+                success = tryKeySimulation(content);
+
+                // Key simulation needs more time to complete
+                if (success) {
+                    // Adaptive wait time based on content length
+                    const base_wait = 50;
+                    const char_wait = @min(content.len / 10, 200); // Cap at 200ms
+                    api.Sleep(@intCast(base_wait + char_wait));
+                }
+            },
         }
     }
 
-    return success;
+    // Verify success
+    var verified = false;
+    if (success) {
+        verified = verifyTextUpdate(content);
+
+        if (verified) {
+            const elapsed = std.time.milliTimestamp() - start_time;
+            debug.debugPrint("{s} succeeded and verified (took {d}ms)\n", .{ @tagName(mode), elapsed });
+        } else {
+            debug.debugPrint("{s} appeared to succeed but failed verification\n", .{@tagName(mode)});
+
+            // If verification failed, wait briefly and try once more
+            api.Sleep(30);
+            verified = verifyTextUpdate(content);
+            if (verified) {
+                debug.debugPrint("Verification succeeded on second attempt\n", .{});
+            }
+        }
+    } else {
+        debug.debugPrint("{s} failed\n", .{@tagName(mode)});
+    }
+
+    return verified;
 }
 
 /// Verify text update succeeded by reading back from the control
