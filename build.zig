@@ -22,6 +22,14 @@ pub fn build(b: *std.Build) void {
     // Install the executable
     b.installArtifact(exe);
 
+    // Copy resources directory to the output directory
+    const install_resources = b.addInstallDirectory(.{
+        .source_dir = b.path("resources"),
+        .install_dir = .{ .custom = "bin" },
+        .install_subdir = "resources",
+    });
+    b.getInstallStep().dependOn(&install_resources.step);
+
     // Create run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
