@@ -4,7 +4,7 @@ pub const sysinput = @import("sysinput.zig");
 const keyboard = sysinput.input.keyboard;
 const buffer = sysinput.core.buffer;
 const buffer_controller = sysinput.buffer_controller;
-const suggestion_handler = sysinput.suggestion_handler;
+const manager = sysinput.suggestion.manager;
 const win32 = sysinput.win32.hook;
 const debug = sysinput.core.debug;
 
@@ -23,8 +23,8 @@ pub fn main() !void {
     const hInstance = win32.GetModuleHandleA(null);
 
     // Initialize suggestion handler
-    try suggestion_handler.init(allocator, hInstance);
-    defer suggestion_handler.deinit();
+    try manager.init(allocator, hInstance);
+    defer manager.deinit();
 
     debug.debugPrint("Starting SysInput...\n", .{});
 

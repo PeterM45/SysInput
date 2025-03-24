@@ -74,6 +74,8 @@ pub fn suggestionWindowProc(
             const hdc = api.BeginPaint(hwnd, &ps);
             defer _ = api.EndPaint(hwnd, &ps);
 
+            debug.debugPrint("Drawing {d} suggestions\n", .{g_ui_state.suggestions.len});
+
             // Draw suggestions
             if (g_ui_state.suggestions.len > 0) {
                 var client_rect: api.RECT = undefined;

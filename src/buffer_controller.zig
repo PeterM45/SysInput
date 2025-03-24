@@ -4,7 +4,7 @@ const sysinput = @import("sysinput.zig");
 const buffer = sysinput.core.buffer;
 const api = sysinput.win32.api;
 const detection = sysinput.input.text_field;
-const suggestion_handler = sysinput.suggestion_handler;
+const manager = sysinput.suggestion.manager;
 const debug = sysinput.core.debug;
 const text_inject = sysinput.win32.text_inject;
 
@@ -30,7 +30,7 @@ var last_known_text: []u8 = &[_]u8{};
 var sync_attempt_count: u8 = 0;
 
 /// Map to remember which sync mode works best with each window class
-var window_class_to_mode: std.StringHashMap(u8) = undefined; // No initial init
+pub var window_class_to_mode: std.StringHashMap(u8) = undefined; // No initial init
 
 pub fn init(allocator: std.mem.Allocator) !void {
     buffer_allocator = allocator;
@@ -192,24 +192,24 @@ pub fn printBufferState() void {
     debug.debugPrint("\"\n", .{});
 
     // Process text through suggestion handler
-    suggestion_handler.processTextForSuggestions(content) catch |err| {
+    manager.processTextForSuggestions(content) catch |err| {
         debug.debugPrint("Error processing text for autocompletion: {}\n", .{err});
     };
 
     // Set current word and get suggestions
-    suggestion_handler.setCurrentWord(word);
-    suggestion_handler.getAutocompleteSuggestions() catch |err| {
+    manager.setCurrentWord(word);
+    manager.getAutocompleteSuggestions() catch |err| {
         debug.debugPrint("Error getting autocompletion suggestions: {}\n", .{err});
     };
 
     // Show suggestions if needed
     const pos = sysinput.ui.position.getCaretPosition();
-    suggestion_handler.showSuggestions(content, word, pos.x, pos.y) catch |err| {
+    manager.showSuggestions(content, word, pos.x, pos.y) catch |err| {
         debug.debugPrint("Error applying suggestions: {}\n", .{err});
     };
     // Check spelling
     if (word.len >= 2) {
-        if (!suggestion_handler.isWordCorrect(word)) {
+        if (!manager.isWordCorrect(word)) {
             // Safely print the word that has a spelling error
             debug.debugPrint("Spelling error detected: \"", .{});
             for (word) |c| {
@@ -223,7 +223,7 @@ pub fn printBufferState() void {
 
             // Get spelling suggestions if word isn't too long
             if (word.len < 15) {
-                suggestion_handler.getSpellingSuggestions(word) catch |err| {
+                manager.getSpellingSuggestions(word) catch |err| {
                     debug.debugPrint("Error getting suggestions: {}\n", .{err});
                     return;
                 };

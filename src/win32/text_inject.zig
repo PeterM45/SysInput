@@ -274,12 +274,19 @@ pub fn trySelectionCompletion(partial_word: []const u8, suggestion: []const u8) 
     return insertTextAsSelection(focus_hwnd.?, completion);
 }
 
-// Add clipboard handling
+/// Insert text via clipboard with better error handling
 pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
     const target = hwnd orelse {
         debug.debugPrint("Clipboard insertion failed: null window handle\n", .{});
         return false;
     };
+
+    if (text.len == 0) {
+        debug.debugPrint("Nothing to insert (empty text)\n", .{});
+        return true; // Consider empty text insertion successful
+    }
+
+    debug.debugPrint("Clipboard insertion of '{s}' ({d} chars)\n", .{ text, text.len });
 
     // Save original clipboard contents
     var original_clipboard_text: ?[]u8 = null;
@@ -289,11 +296,11 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
         }
     }
 
-    // Try to save original clipboard contents
-    if (api.OpenClipboard(null) != 0) {
-        const original_handle = api.GetClipboardData(api.CF_TEXT);
+    // Try to save original clipboard contents with proper error handling
+    if (api.openClipboard(null) != 0) {
+        const original_handle = api.getClipboardData(api.CF_TEXT);
         if (original_handle != null) {
-            const data_ptr = api.GlobalLock(original_handle.?);
+            const data_ptr = api.globalLock(original_handle.?);
             if (data_ptr != null) {
                 const str_len = api.lstrlenA(data_ptr);
                 if (str_len > 0) {
@@ -302,77 +309,109 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
                     if (original_clipboard_text) |buffer| {
                         std.mem.copyForwards(u8, buffer, @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
                         buffer[u_str_len] = 0; // Null terminate
+                        debug.debugPrint("Saved original clipboard contents ({d} chars)\n", .{u_str_len});
                     }
                 }
-                _ = api.GlobalUnlock(original_handle.?);
+                _ = api.globalUnlock(original_handle.?);
             }
         }
-        _ = api.CloseClipboard();
+        _ = api.closeClipboard();
+    } else {
+        debug.debugPrint("Warning: Failed to open clipboard to save original content\n", .{});
     }
 
-    // Prepare to set clipboard with our text
-    if (api.OpenClipboard(null) != 0) {
-        _ = api.EmptyClipboard();
-
-        // Allocate global memory for the text
-        const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, text.len + 1);
-        if (handle != null) {
-            const data_ptr = api.GlobalLock(handle.?);
-            if (data_ptr != null) {
-                // Copy text to global memory
-                @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
-                @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
-                _ = api.GlobalUnlock(handle.?);
-
-                // Set clipboard data
-                if (api.SetClipboardData(api.CF_TEXT, handle) == null) {
-                    _ = api.GlobalFree(handle.?);
-                    _ = api.CloseClipboard();
-                    return false;
-                }
-            } else {
-                _ = api.GlobalFree(handle.?);
-                _ = api.CloseClipboard();
-                return false;
-            }
-        } else {
-            _ = api.CloseClipboard();
-            return false;
-        }
-
-        _ = api.CloseClipboard();
-
-        // Send paste command to the window
-        _ = api.SendMessageA(target, api.WM_PASTE, 0, 0);
-
-        // Wait a bit for paste to complete
-        api.Sleep(50);
-
-        // Restore original clipboard if we had saved it
-        if (original_clipboard_text) |orig_text| {
-            if (api.OpenClipboard(null) != 0) {
-                _ = api.EmptyClipboard();
-
-                const restore_handle = api.GlobalAlloc(api.GMEM_MOVEABLE, orig_text.len);
-                if (restore_handle != null) {
-                    const restore_ptr = api.GlobalLock(restore_handle.?);
-                    if (restore_ptr != null) {
-                        @memcpy(@as([*]u8, @ptrCast(restore_ptr))[0 .. orig_text.len - 1], orig_text[0 .. orig_text.len - 1]);
-                        @as([*]u8, @ptrCast(restore_ptr))[orig_text.len - 1] = 0; // Null terminate
-                        _ = api.GlobalUnlock(restore_handle.?);
-
-                        _ = api.SetClipboardData(api.CF_TEXT, restore_handle);
-                    } else {
-                        _ = api.GlobalFree(restore_handle.?);
-                    }
-                }
-
-                _ = api.CloseClipboard();
-            }
-        }
-
-        return true;
+    // Set clipboard with new text with proper error handling
+    if (api.openClipboard(null) == 0) {
+        debug.debugPrint("Failed to open clipboard for setting data\n", .{});
+        return false;
     }
 
-    return false;
+    _ = api.emptyClipboard();
+
+    // Allocate global memory for the text
+    const handle = api.globalAlloc(api.GMEM_MOVEABLE, text.len + 1);
+    if (handle == null) {
+        debug.debugPrint("Failed to allocate clipboard memory\n", .{});
+        _ = api.closeClipboard();
+        return false;
+    }
+
+    const data_ptr = api.globalLock(handle.?);
+    if (data_ptr == null) {
+        debug.debugPrint("Failed to lock clipboard memory\n", .{});
+        _ = api.globalFree(handle.?);
+        _ = api.closeClipboard();
+        return false;
+    }
+
+    // Copy text to global memory
+    @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
+    @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
+    _ = api.globalUnlock(handle.?);
+
+    // Set clipboard data
+    if (api.setClipboardData(api.CF_TEXT, handle) == null) {
+        debug.debugPrint("Failed to set clipboard data\n", .{});
+        _ = api.globalFree(handle.?);
+        _ = api.closeClipboard();
+        return false;
+    }
+
+    _ = api.closeClipboard();
+
+    // Send paste command to the window with retry logic
+    var paste_attempts: u8 = 0;
+    const max_paste_attempts: u8 = 3;
+
+    // Make multiple paste attempts with small delays
+    while (paste_attempts < max_paste_attempts) : (paste_attempts += 1) {
+        // Send paste message
+        _ = api.sendMessage(target, api.WM_PASTE, 0, 0);
+
+        // Wait to give paste time to complete
+        api.sleep(50 * (paste_attempts + 1));
+
+        // Try to verify paste success (basic verification)
+        if (paste_attempts == 0) {
+            // Just proceed on first attempt
+            continue;
+        }
+
+        // On subsequent attempts, try to verify
+        const focus_hwnd = api.getFocus();
+        if (focus_hwnd != null and focus_hwnd.? == target) {
+            // This is a very simple verification - just check if focus is still
+            // on our target. Could be expanded with text content verification.
+            break;
+        }
+    }
+
+    // Wait a bit for paste to complete before restoring clipboard
+    api.sleep(50);
+
+    // Restore original clipboard if we had saved it
+    if (original_clipboard_text) |orig_text| {
+        if (api.openClipboard(null) != 0) {
+            _ = api.emptyClipboard();
+
+            const restore_handle = api.globalAlloc(api.GMEM_MOVEABLE, orig_text.len);
+            if (restore_handle != null) {
+                const restore_ptr = api.globalLock(restore_handle.?);
+                if (restore_ptr != null) {
+                    @memcpy(@as([*]u8, @ptrCast(restore_ptr))[0 .. orig_text.len - 1], orig_text[0 .. orig_text.len - 1]);
+                    @as([*]u8, @ptrCast(restore_ptr))[orig_text.len - 1] = 0; // Null terminate
+                    _ = api.globalUnlock(restore_handle.?);
+
+                    _ = api.setClipboardData(api.CF_TEXT, restore_handle);
+                    debug.debugPrint("Original clipboard content restored\n", .{});
+                } else {
+                    _ = api.globalFree(restore_handle.?);
+                }
+            }
+
+            _ = api.closeClipboard();
+        }
+    }
+
+    return true;
 }

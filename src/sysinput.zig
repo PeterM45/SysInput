@@ -7,6 +7,12 @@ pub const core = struct {
 pub const input = struct {
     pub const keyboard = @import("input/keyboard.zig");
     pub const text_field = @import("input/text_field.zig");
+    pub const window_detection = @import("input/window_detection.zig");
+};
+
+pub const suggestion = struct {
+    pub const manager = @import("suggestion/manager.zig");
+    pub const stats = @import("suggestion/stats.zig");
 };
 
 pub const text = struct {
@@ -14,6 +20,7 @@ pub const text = struct {
     pub const dictionary = @import("text/dictionary.zig");
     pub const edit_distance = @import("text/edit_distance.zig");
     pub const spellcheck = @import("text/spellcheck.zig");
+    pub const insertion = @import("text/insertion.zig");
 };
 
 pub const ui = struct {
@@ -30,4 +37,3 @@ pub const win32 = struct {
 
 // Root-level modules
 pub const buffer_controller = @import("buffer_controller.zig");
-pub const suggestion_handler = @import("suggestion_handler.zig");

@@ -1,5 +1,8 @@
 const std = @import("std");
-const dict = @import("dictionary.zig");
+const sysinput = @import("../sysinput.zig");
+
+const dict = sysinput.text.dictionary;
+const insertion = sysinput.text.insertion;
 
 /// Maximum number of suggestions to generate
 const MAX_SUGGESTIONS = 5;
@@ -129,7 +132,7 @@ pub const AutocompleteEngine = struct {
         var word_start: ?usize = null;
 
         for (text, 0..) |char, i| {
-            if (isWordChar(char)) {
+            if (insertion.isWordChar(char)) {
                 if (word_start == null) {
                     word_start = i;
                 }
@@ -154,9 +157,3 @@ pub const AutocompleteEngine = struct {
         self.current_word = "";
     }
 };
-
-/// Check if a character is part of a word
-fn isWordChar(c: u8) bool {
-    // Allow letters, numbers, underscore, and apostrophe (for contractions)
-    return std.ascii.isAlphanumeric(c) or c == '_' or c == '\'';
-}

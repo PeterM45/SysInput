@@ -3,7 +3,7 @@ const sysinput = @import("../sysinput.zig");
 
 const win32 = sysinput.win32.hook;
 const buffer_controller = sysinput.buffer_controller;
-const suggestion_handler = sysinput.suggestion_handler;
+const manager = sysinput.suggestion.manager;
 const debug = sysinput.core.debug;
 
 pub var g_hook: ?win32.HHOOK = null;
@@ -36,7 +36,7 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
             var key_consumed = false;
 
             // Handle navigation keys when autocomplete is visible
-            if (suggestion_handler.isSuggestionUIVisible() and
+            if (manager.isSuggestionUIVisible() and
                 (kbd.vkCode == win32.VK_UP or
                     kbd.vkCode == win32.VK_DOWN or
                     kbd.vkCode == win32.VK_TAB or
@@ -50,24 +50,24 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                 switch (kbd.vkCode) {
                     win32.VK_UP => {
                         // Move to previous suggestion
-                        suggestion_handler.navigateToPreviousSuggestion();
+                        manager.navigateToPreviousSuggestion();
                         return 1; // Prevent default handling
                     },
                     win32.VK_DOWN => {
                         // Move to next suggestion
-                        suggestion_handler.navigateToNextSuggestion();
+                        manager.navigateToNextSuggestion();
                         return 1; // Prevent default handling
                     },
                     win32.VK_TAB, win32.VK_RIGHT => {
                         debug.debugPrint("Accepting current suggestion\n", .{});
                         // Accept current suggestion
-                        suggestion_handler.acceptCurrentSuggestion();
+                        manager.acceptCurrentSuggestion();
                         return 1; // Prevent default handling
                     },
                     win32.VK_RETURN => {
                         debug.debugPrint("Accepting current suggestion with enter\n", .{});
                         // Accept current suggestion
-                        suggestion_handler.acceptCurrentSuggestion();
+                        manager.acceptCurrentSuggestion();
 
                         // Special handling for return key - after accepting suggestion,
                         // we also need to properly handle the return key itself, so we don't
@@ -107,19 +107,19 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                 kbd.vkCode == win32.VK_NEXT); // Page Down
 
             // If suggestions UI is visible, use navigation keys for selection
-            if (suggestion_handler.isSuggestionUIVisible()) {
+            if (manager.isSuggestionUIVisible()) {
                 if (kbd.vkCode == win32.VK_UP) {
-                    suggestion_handler.navigateToPreviousSuggestion();
+                    manager.navigateToPreviousSuggestion();
                     return 1; // Consume the key
                 } else if (kbd.vkCode == win32.VK_DOWN) {
-                    suggestion_handler.navigateToNextSuggestion();
+                    manager.navigateToNextSuggestion();
                     return 1; // Consume the key
                 } else if (kbd.vkCode == win32.VK_TAB or
                     kbd.vkCode == win32.VK_RETURN or
                     kbd.vkCode == win32.VK_RIGHT)
                 {
                     debug.debugPrint("Accepting suggestion via key: 0x{X}\n", .{kbd.vkCode});
-                    suggestion_handler.acceptCurrentSuggestion();
+                    manager.acceptCurrentSuggestion();
                     return 1; // Consume the key
                 }
             } else if (is_navigation_key) {

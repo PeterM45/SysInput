@@ -1,5 +1,8 @@
 const std = @import("std");
-const debug = @import("debug.zig");
+const sysinput = @import("../sysinput.zig");
+
+const debug = sysinput.core.debug;
+const insertion = sysinput.text.insertion;
 
 /// Maximum text buffer size
 const MAX_BUFFER_SIZE = 4096;
@@ -246,12 +249,12 @@ pub const TextBuffer = struct {
         var end = self.cursor.offset;
 
         // Find the start of the word
-        while (start > 0 and isWordChar(content[start - 1])) {
+        while (start > 0 and insertion.isWordChar(content[start - 1])) {
             start -= 1;
         }
 
         // Find the end of the word
-        while (end < content.len and isWordChar(content[end])) {
+        while (end < content.len and insertion.isWordChar(content[end])) {
             end += 1;
         }
 
@@ -285,12 +288,6 @@ pub const TextBuffer = struct {
         self.content_dirty = true;
     }
 };
-
-/// Check if a character is part of a word
-fn isWordChar(c: u8) bool {
-    // Make sure character is valid ASCII and is alphanumeric or apostrophe
-    return c != 0 and std.ascii.isPrint(c) and (std.ascii.isAlphanumeric(c) or c == '_' or c == '\'');
-}
 
 /// Text buffer manager to handle multiple text fields across applications
 pub const BufferManager = struct {
