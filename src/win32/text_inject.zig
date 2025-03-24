@@ -41,7 +41,7 @@ pub fn insertTextAsSelection(hwnd: api.HWND, text: []const u8) bool {
 fn tryDirectInsertion(hwnd: api.HWND, text: []const u8) bool {
     // Create null-terminated text
     const buffer = std.heap.page_allocator.allocSentinel(u8, text.len, 0) catch {
-        std.debug.print("Failed to allocate buffer for text insertion\n", .{});
+        debug.debugPrint("Failed to allocate buffer for text insertion\n", .{});
         return false;
     };
     defer std.heap.page_allocator.free(buffer);
@@ -54,7 +54,7 @@ fn tryDirectInsertion(hwnd: api.HWND, text: []const u8) bool {
     const before_u64: u64 = @bitCast(before_sel);
     const before_start: u32 = @truncate(before_u64 & 0xFFFF);
     const before_end: u32 = @truncate((before_u64 >> 16) & 0xFFFF);
-    std.debug.print("Selection before insert: {d}-{d}\n", .{ before_start, before_end });
+    debug.debugPrint("Selection before insert: {d}-{d}\n", .{ before_start, before_end });
 
     // Insert the text using EM_REPLACESEL
     const insert_result = api.SendMessageA(hwnd, api.EM_REPLACESEL, 1, // True to allow undo
@@ -62,7 +62,7 @@ fn tryDirectInsertion(hwnd: api.HWND, text: []const u8) bool {
 
     // Check if successful
     if (insert_result == 0) {
-        std.debug.print("EM_REPLACESEL failed\n", .{});
+        debug.debugPrint("EM_REPLACESEL failed\n", .{});
         return false;
     }
 
@@ -72,11 +72,11 @@ fn tryDirectInsertion(hwnd: api.HWND, text: []const u8) bool {
     const after_start: u32 = @truncate(after_u64 & 0xFFFF);
     const after_end: u32 = @truncate((after_u64 >> 16) & 0xFFFF);
 
-    std.debug.print("Selection after insert: {d}-{d}\n", .{ after_start, after_end });
+    debug.debugPrint("Selection after insert: {d}-{d}\n", .{ after_start, after_end });
 
     // If selection didn't change, insertion likely failed
     if (before_end == after_end) {
-        std.debug.print("Selection didn't change, insertion may have failed\n", .{});
+        debug.debugPrint("Selection didn't change, insertion may have failed\n", .{});
         return false;
     }
 
@@ -204,7 +204,7 @@ pub fn tryDirectCompletion(partial_word: []const u8, suggestion: []const u8) boo
     const focus_hwnd = api.GetFocus();
     if (focus_hwnd == null) return false;
 
-    std.debug.print("Trying direct completion: '{s}' -> '{s}'\n", .{ partial_word, suggestion });
+    debug.debugPrint("Trying direct completion: '{s}' -> '{s}'\n", .{ partial_word, suggestion });
 
     // Try to get selection/position in text field using standard approach
     const selection_result = api.SendMessageA(focus_hwnd.?, api.EM_GETSEL, 0, 0);
@@ -214,7 +214,7 @@ pub fn tryDirectCompletion(partial_word: []const u8, suggestion: []const u8) boo
     const start: api.DWORD = @truncate(result_u64 & 0xFFFF);
     const end: api.DWORD = @truncate((result_u64 >> 16) & 0xFFFF);
 
-    std.debug.print("Selection: {d}-{d}\n", .{ start, end });
+    debug.debugPrint("Selection: {d}-{d}\n", .{ start, end });
 
     // If we have a valid selection position
     if (start != 0 or end != 0) {
@@ -247,7 +247,7 @@ pub fn trySelectionCompletion(partial_word: []const u8, suggestion: []const u8) 
     const focus_hwnd = api.GetFocus();
     if (focus_hwnd == null) return false;
 
-    std.debug.print("Trying selection completion: '{s}' -> '{s}'\n", .{ partial_word, suggestion });
+    debug.debugPrint("Trying selection completion: '{s}' -> '{s}'\n", .{ partial_word, suggestion });
 
     // Try to get text length in the control
     const text_length = api.SendMessageA(focus_hwnd.?, api.WM_GETTEXTLENGTH, 0, 0);
@@ -272,4 +272,107 @@ pub fn trySelectionCompletion(partial_word: []const u8, suggestion: []const u8) 
 
     // Try to insert the completion
     return insertTextAsSelection(focus_hwnd.?, completion);
+}
+
+// Add clipboard handling
+pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
+    const target = hwnd orelse {
+        debug.debugPrint("Clipboard insertion failed: null window handle\n", .{});
+        return false;
+    };
+
+    // Save original clipboard contents
+    var original_clipboard_text: ?[]u8 = null;
+    defer {
+        if (original_clipboard_text) |txt| {
+            std.heap.page_allocator.free(txt);
+        }
+    }
+
+    // Try to save original clipboard contents
+    if (api.OpenClipboard(null) != 0) {
+        const original_handle = api.GetClipboardData(api.CF_TEXT);
+        if (original_handle != null) {
+            const data_ptr = api.GlobalLock(original_handle.?);
+            if (data_ptr != null) {
+                const str_len = api.lstrlenA(data_ptr);
+                if (str_len > 0) {
+                    const u_str_len: usize = @intCast(str_len);
+                    original_clipboard_text = std.heap.page_allocator.alloc(u8, u_str_len + 1) catch null;
+                    if (original_clipboard_text) |buffer| {
+                        std.mem.copyForwards(u8, buffer, @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
+                        buffer[u_str_len] = 0; // Null terminate
+                    }
+                }
+                _ = api.GlobalUnlock(original_handle.?);
+            }
+        }
+        _ = api.CloseClipboard();
+    }
+
+    // Prepare to set clipboard with our text
+    if (api.OpenClipboard(null) != 0) {
+        _ = api.EmptyClipboard();
+
+        // Allocate global memory for the text
+        const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, text.len + 1);
+        if (handle != null) {
+            const data_ptr = api.GlobalLock(handle.?);
+            if (data_ptr != null) {
+                // Copy text to global memory
+                @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
+                @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
+                _ = api.GlobalUnlock(handle.?);
+
+                // Set clipboard data
+                if (api.SetClipboardData(api.CF_TEXT, handle) == null) {
+                    _ = api.GlobalFree(handle);
+                    _ = api.CloseClipboard();
+                    return false;
+                }
+            } else {
+                _ = api.GlobalFree(handle);
+                _ = api.CloseClipboard();
+                return false;
+            }
+        } else {
+            _ = api.CloseClipboard();
+            return false;
+        }
+
+        _ = api.CloseClipboard();
+
+        // Send paste command to the window
+        _ = api.SendMessageA(target, api.WM_PASTE, 0, 0);
+
+        // Wait a bit for paste to complete
+        api.Sleep(50);
+
+        // Restore original clipboard if we had saved it
+        if (original_clipboard_text) |orig_text| {
+            if (api.OpenClipboard(null) != 0) {
+                _ = api.EmptyClipboard();
+
+                const restore_handle = api.GlobalAlloc(api.GMEM_MOVEABLE, orig_text.len);
+                if (restore_handle != null) {
+                    const restore_ptr = api.GlobalLock(restore_handle.?);
+                    if (restore_ptr != null) {
+                        @memcpy(@as([*]u8, @ptrCast(restore_ptr))[0 .. orig_text.len - 1], orig_text[0 .. orig_text.len - 1]);
+                        @as([*]u8, @ptrCast(restore_ptr))[orig_text.len - 1] = 0; // Null terminate
+                        _ = api.GlobalUnlock(restore_handle.?);
+
+                        _ = api.SetClipboardData(api.CF_TEXT, restore_handle);
+                    } else {
+                        _ = api.GlobalFree(restore_handle);
+                    }
+                }
+
+                _ = api.CloseClipboard();
+            }
+        }
+
+        return true;
+    }
+
+    return false;
 }

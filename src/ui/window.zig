@@ -2,6 +2,7 @@ const std = @import("std");
 const sysinput = @import("../sysinput.zig");
 
 const api = sysinput.win32.api;
+const debug = sysinput.core.debug;
 
 /// Window class for suggestion popup
 pub const SUGGESTION_WINDOW_CLASS = "SysInputSuggestions";
@@ -41,7 +42,7 @@ pub fn suggestionWindowProc(
 ) callconv(.C) api.LRESULT {
     switch (msg) {
         api.WM_CREATE => {
-            std.debug.print("Suggestion window created\n", .{});
+            debug.debugPrint("Suggestion window created\n", .{});
 
             // Create a font for the suggestions
             g_ui_state.font = api.CreateFontA(
@@ -62,7 +63,7 @@ pub fn suggestionWindowProc(
             );
 
             if (g_ui_state.font == null) {
-                std.debug.print("Failed to create font\n", .{});
+                debug.debugPrint("Failed to create font\n", .{});
             }
 
             return 0;
@@ -201,7 +202,7 @@ pub fn registerSuggestionWindowClass(instance: api.HINSTANCE) !api.ATOM {
 
     const atom = api.RegisterClassExA(&wc);
     if (atom == 0) {
-        std.debug.print("Failed to register window class\n", .{});
+        debug.debugPrint("Failed to register window class\n", .{});
         return error.WindowClassRegistrationFailed;
     }
 

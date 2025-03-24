@@ -6,6 +6,7 @@ const api = sysinput.win32.api;
 const detection = sysinput.input.text_field;
 const suggestion_handler = sysinput.suggestion_handler;
 const debug = sysinput.core.debug;
+const text_inject = sysinput.win32.text_inject;
 
 /// Sync mode determines which synchronization strategy to use
 pub const SyncMode = enum(u8) {
@@ -29,7 +30,7 @@ var last_known_text: []u8 = &[_]u8{};
 var sync_attempt_count: u8 = 0;
 
 /// Map to remember which sync mode works best with each window class
-var window_class_to_mode = std.StringHashMap(u8).init(std.heap.page_allocator);
+var window_class_to_mode: std.StringHashMap(u8) = undefined; // No initial init
 
 pub fn init(allocator: std.mem.Allocator) !void {
     buffer_allocator = allocator;
@@ -41,16 +42,32 @@ pub fn init(allocator: std.mem.Allocator) !void {
     window_class_to_mode = std.StringHashMap(u8).init(allocator);
 }
 
+fn printEscaped(text: []const u8) void {
+    for (text) |c| {
+        if (std.ascii.isPrint(c)) {
+            debug.debugPrint("{c}", .{c});
+        } else {
+            debug.debugPrint("\\x{X:0>2}", .{c});
+        }
+    }
+}
+
+fn getWindowClassName(hwnd: ?api.HWND) ?[]const u8 {
+    var class_name: [64]u8 = undefined;
+    const class_len = api.GetClassNameA(hwnd, @ptrCast(&class_name), 64);
+    return if (class_len > 0) class_name[0..@as(usize, @intCast(class_len))] else null;
+}
+
 /// Detect the active text field and sync with our buffer
 pub fn detectActiveTextField() void {
     const active_field_found = text_field_manager.detectActiveField();
 
     if (active_field_found) {
-        std.debug.print("Active text field detected\n", .{});
+        debug.debugPrint("Active text field detected\n", .{});
 
         // Get the text content from the field
         const text = text_field_manager.getActiveFieldText() catch |err| {
-            std.debug.print("Failed to get text field content: {}\n", .{err});
+            debug.debugPrint("Failed to get text field content: {}\n", .{err});
             return;
         };
         defer buffer_allocator.free(text);
@@ -58,12 +75,12 @@ pub fn detectActiveTextField() void {
         // Update our buffer with the current text field content
         buffer_manager.resetBuffer();
         buffer_manager.insertString(text) catch |err| {
-            std.debug.print("Failed to sync buffer with text field: {}\n", .{err});
+            debug.debugPrint("Failed to sync buffer with text field: {}\n", .{err});
         };
 
-        std.debug.print("Synced buffer with text field content: \"{s}\"\n", .{text});
+        debug.debugPrint("Synced buffer with text field content: \"{s}\"\n", .{text});
     } else {
-        std.debug.print("No active text field found\n", .{});
+        debug.debugPrint("No active text field found\n", .{});
     }
 }
 
@@ -102,96 +119,6 @@ fn tryNormalTextFieldUpdate(content: []const u8) bool {
         @as(api.LPARAM, @intCast(@intFromPtr(text_buffer.ptr))));
 
     return result != 0;
-}
-
-/// Try updating using clipboard
-fn tryClipboardUpdate(content: []const u8) bool {
-    const focus_hwnd = api.GetFocus();
-    if (focus_hwnd == null) {
-        return false;
-    }
-
-    // Save original clipboard contents
-    var original_clipboard_text: ?[]u8 = null;
-    defer {
-        if (original_clipboard_text) |txt| {
-            std.heap.page_allocator.free(txt);
-        }
-    }
-
-    // Try to save original clipboard
-    if (api.OpenClipboard(null) != 0) {
-        const original_handle = api.GetClipboardData(api.CF_TEXT);
-        if (original_handle != null) {
-            const data_ptr = api.GlobalLock(original_handle.?);
-            if (data_ptr != null) {
-                const str_len = api.lstrlenA(data_ptr);
-                if (str_len > 0) {
-                    const u_str_len: usize = @intCast(str_len);
-                    original_clipboard_text = std.heap.page_allocator.alloc(u8, u_str_len + 1) catch null;
-                    if (original_clipboard_text) |text_buffer| {
-                        std.mem.copyForwards(u8, text_buffer, @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
-                        text_buffer[u_str_len] = 0; // Null terminate
-                    }
-                }
-                _ = api.GlobalUnlock(original_handle.?);
-            }
-        }
-        _ = api.CloseClipboard();
-    }
-
-    // Set clipboard with new content
-    if (api.OpenClipboard(null) != 0) {
-        _ = api.EmptyClipboard();
-
-        const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, content.len + 1);
-        if (handle != null) {
-            const data_ptr = api.GlobalLock(handle.?);
-            if (data_ptr != null) {
-                @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..content.len], content);
-                @as([*]u8, @ptrCast(data_ptr))[content.len] = 0; // Null terminate
-                _ = api.GlobalUnlock(handle.?);
-
-                _ = api.SetClipboardData(api.CF_TEXT, handle);
-            }
-        }
-
-        _ = api.CloseClipboard();
-
-        // Select all text in control
-        _ = api.SendMessageA(focus_hwnd.?, api.EM_SETSEL, 0, -1);
-
-        // Send paste command
-        _ = api.SendMessageA(focus_hwnd.?, api.WM_PASTE, 0, 0);
-
-        // Wait for paste to complete
-        api.Sleep(50);
-
-        // Restore original clipboard if needed
-        if (original_clipboard_text) |orig_text| {
-            if (api.OpenClipboard(null) != 0) {
-                _ = api.EmptyClipboard();
-
-                const restore_handle = api.GlobalAlloc(api.GMEM_MOVEABLE, orig_text.len);
-                if (restore_handle != null) {
-                    const restore_ptr = api.GlobalLock(restore_handle.?);
-                    if (restore_ptr != null) {
-                        @memcpy(@as([*]u8, @ptrCast(restore_ptr))[0 .. orig_text.len - 1], orig_text[0 .. orig_text.len - 1]);
-                        @as([*]u8, @ptrCast(restore_ptr))[orig_text.len - 1] = 0; // Null terminate
-                        _ = api.GlobalUnlock(restore_handle.?);
-
-                        _ = api.SetClipboardData(api.CF_TEXT, restore_handle);
-                    }
-                }
-
-                _ = api.CloseClipboard();
-            }
-        }
-
-        return true;
-    }
-
-    return false;
 }
 
 /// Try updating using key simulation
@@ -250,67 +177,54 @@ fn tryKeySimulation(content: []const u8) bool {
 /// Print the current buffer state and process text for autocompletion
 pub fn printBufferState() void {
     const content = buffer_manager.getCurrentText();
-    // Print content with safe escaping for non-printable characters
-    debug.debugPrint("Buffer: \"{s}\"\n", .{content});
-    for (content) |c| {
-        if (std.ascii.isPrint(c)) {
-            std.debug.print("{c}", .{c});
-        } else {
-            std.debug.print("\\x{X:0>2}", .{c});
-        }
-    }
-    std.debug.print("\" (len: {})\n", .{content.len});
+    debug.debugPrint("Buffer: \"", .{});
+    printEscaped(content);
+    debug.debugPrint("\" (len: {})\n", .{content.len});
 
     const word = buffer_manager.getCurrentWord() catch {
-        std.debug.print("Error getting current word\n", .{});
+        debug.debugPrint("Error getting current word\n", .{});
         return;
     };
 
     // Print word with safe escaping
-    std.debug.print("Current word: \"", .{});
-    for (word) |c| {
-        if (std.ascii.isPrint(c)) {
-            std.debug.print("{c}", .{c});
-        } else {
-            std.debug.print("\\x{X:0>2}", .{c});
-        }
-    }
-    std.debug.print("\"\n", .{});
+    debug.debugPrint("Current word: \"", .{});
+    printEscaped(word);
+    debug.debugPrint("\"\n", .{});
 
     // Process text through suggestion handler
     suggestion_handler.processTextForSuggestions(content) catch |err| {
-        std.debug.print("Error processing text for autocompletion: {}\n", .{err});
+        debug.debugPrint("Error processing text for autocompletion: {}\n", .{err});
     };
 
     // Set current word and get suggestions
     suggestion_handler.setCurrentWord(word);
     suggestion_handler.getAutocompleteSuggestions() catch |err| {
-        std.debug.print("Error getting autocompletion suggestions: {}\n", .{err});
+        debug.debugPrint("Error getting autocompletion suggestions: {}\n", .{err});
     };
 
     // Show suggestions if needed
     const pos = sysinput.ui.position.getCaretPosition();
     suggestion_handler.showSuggestions(content, word, pos.x, pos.y) catch |err| {
-        std.debug.print("Error applying suggestions: {}\n", .{err});
+        debug.debugPrint("Error applying suggestions: {}\n", .{err});
     };
     // Check spelling
     if (word.len >= 2) {
         if (!suggestion_handler.isWordCorrect(word)) {
             // Safely print the word that has a spelling error
-            std.debug.print("Spelling error detected: \"", .{});
+            debug.debugPrint("Spelling error detected: \"", .{});
             for (word) |c| {
                 if (std.ascii.isPrint(c)) {
-                    std.debug.print("{c}", .{c});
+                    debug.debugPrint("{c}", .{c});
                 } else {
-                    std.debug.print("\\x{X:0>2}", .{c});
+                    debug.debugPrint("\\x{X:0>2}", .{c});
                 }
             }
-            std.debug.print("\"\n", .{});
+            debug.debugPrint("\"\n", .{});
 
             // Get spelling suggestions if word isn't too long
             if (word.len < 15) {
                 suggestion_handler.getSpellingSuggestions(word) catch |err| {
-                    std.debug.print("Error getting suggestions: {}\n", .{err});
+                    debug.debugPrint("Error getting suggestions: {}\n", .{err});
                     return;
                 };
 
@@ -350,14 +264,6 @@ pub fn processKeyPress(key: u8, is_char: bool) !void {
     syncTextFieldWithBuffer();
 }
 
-/// A helper function to insert a test string
-pub fn insertTestString() void {
-    const test_string = "Hello, World!";
-    insertString(test_string) catch |err| {
-        std.debug.print("Error inserting test string: {}\n", .{err});
-    };
-}
-
 /// Get current text from buffer
 pub fn getCurrentText() []const u8 {
     return buffer_manager.getCurrentText();
@@ -368,34 +274,10 @@ pub fn getCurrentWord() ![]const u8 {
     return buffer_manager.getCurrentWord();
 }
 
-/// Process backspace key, handling errors internally
-pub fn handleBackspace() void {
-    buffer_manager.processBackspace() catch |err| {
-        std.debug.print("Backspace error: {}\n", .{err});
-    };
-    syncTextFieldWithBuffer();
-}
-
-/// Process delete key, handling errors internally
-pub fn handleDelete() void {
-    buffer_manager.processDelete() catch |err| {
-        std.debug.print("Delete error: {}\n", .{err});
-    };
-    syncTextFieldWithBuffer();
-}
-
-/// Process character input, handling errors internally
+/// Process char input, handling errors internally
 pub fn handleCharInput(char: u8) void {
     buffer_manager.processKeyPress(char, true) catch |err| {
-        std.debug.print("Key processing error: {}\n", .{err});
-    };
-    syncTextFieldWithBuffer();
-}
-
-/// Process return key, handling errors internally
-pub fn handleReturn() void {
-    buffer_manager.processKeyPress('\n', true) catch |err| {
-        std.debug.print("Return key error: {}\n", .{err});
+        debug.debugPrint("Char input error: {}\n", .{err});
     };
     syncTextFieldWithBuffer();
 }
@@ -428,31 +310,34 @@ pub fn syncTextFieldWithBufferAndVerify() bool {
 
     // Store the content we want to insert
     const content = buffer_manager.getCurrentText();
-    std.debug.print("Syncing buffer to text field: \"{s}\"\n", .{content});
+    debug.debugPrint("Syncing buffer to text field: \"{s}\"\n", .{content});
 
     // Get window class to determine best method
     const focus_hwnd = api.GetFocus();
     var preferred_mode: ?SyncMode = null;
 
-    if (focus_hwnd != null) {
-        var class_name: [64]u8 = [_]u8{0} ** 64;
-        const class_ptr: [*:0]u8 = @ptrCast(&class_name);
-        const class_len = detection.GetClassNameA(focus_hwnd.?, class_ptr, 64);
+    // Get window class name once
+    const class_slice = if (focus_hwnd != null)
+        getWindowClassName(focus_hwnd)
+    else
+        null;
 
-        if (class_len > 0) {
-            const class_slice = class_name[0..@intCast(class_len)];
-            debug.debugPrint("Window class: {s}\n", .{class_slice});
+    // Check if we have a preferred method for this class
+    if (class_slice != null) {
+        debug.debugPrint("Window class: {s}\n", .{class_slice.?});
 
-            // Check if we have a preferred method for this class
-            if (window_class_to_mode.get(class_slice)) |mode_val| {
-                preferred_mode = @as(SyncMode, @enumFromInt(mode_val));
-                debug.debugPrint("Using preferred sync mode: {s}\n", .{@tagName(preferred_mode.?)});
-            }
+        if (window_class_to_mode.get(class_slice.?)) |mode_val| {
+            preferred_mode = @as(SyncMode, @enumFromInt(mode_val));
+            debug.debugPrint("Using preferred sync mode: {s}\n", .{@tagName(preferred_mode.?)});
         }
     }
 
     // Try methods in order of preference
     var success = false;
+
+    // Track attempts for retry logic
+    var attempt_count: u8 = 0;
+    const max_attempts: u8 = 2; // Allow one retry
 
     // Try preferred method first if we have one
     if (preferred_mode) |mode| {
@@ -466,42 +351,52 @@ pub fn syncTextFieldWithBufferAndVerify() bool {
     // Otherwise, try methods in default order (skipping any we already tried)
     const methods = [_]SyncMode{ .Normal, .Clipboard, .Simulation };
 
-    for (methods) |mode| {
-        // Skip if this was already tried as the preferred method
-        if (preferred_mode != null and mode == preferred_mode.?) {
-            continue;
-        }
-
-        success = trySyncMethod(mode, content);
-        if (success) {
-            // Remember this successful method for this window class
-            if (focus_hwnd != null) {
-                var class_name: [64]u8 = [_]u8{0} ** 64;
-                const class_ptr: [*:0]u8 = @ptrCast(&class_name);
-                const class_len = detection.GetClassNameA(focus_hwnd.?, class_ptr, 64);
-
-                if (class_len > 0) {
-                    const class_slice = class_name[0..@intCast(class_len)];
-                    const owned_class = buffer_allocator.dupe(u8, class_slice) catch {
-                        debug.debugPrint("Failed to allocate for class name\n", .{});
-                        return true;
-                    };
-
-                    window_class_to_mode.put(owned_class, @intFromEnum(mode)) catch {
-                        buffer_allocator.free(owned_class);
-                        debug.debugPrint("Failed to store class preference\n", .{});
-                    };
-
-                    debug.debugPrint("Learned: {s} works best with {s}\n", .{ class_slice, @tagName(mode) });
-                }
+    retry: while (attempt_count < max_attempts) : (attempt_count += 1) {
+        for (methods) |mode| {
+            // Skip if this was already tried as the preferred method
+            if (preferred_mode != null and mode == preferred_mode.?) {
+                continue;
             }
 
-            return true;
+            success = trySyncMethod(mode, content);
+            if (success) {
+                // Remember this successful method for this window class
+                if (class_slice != null and focus_hwnd != null) {
+                    storeSuccessfulMethod(class_slice.?, mode);
+                    debug.debugPrint("Learned: {s} works best with {s}\n", .{ class_slice.?, @tagName(mode) });
+                }
+                return true;
+            }
+        }
+
+        // If first attempt failed, wait briefly before retry
+        if (attempt_count == 0) {
+            debug.debugPrint("First sync attempt failed, retrying...\n", .{});
+            api.Sleep(50); // Short delay before retry
+
+            // Detect text field again in case focus changed
+            if (!text_field_manager.detectActiveField()) {
+                debug.debugPrint("Lost active text field during retry\n", .{});
+                break :retry;
+            }
         }
     }
 
-    std.debug.print("Failed to update text field reliably\n", .{});
+    debug.debugPrint("Failed to update text field reliably after {d} attempts\n", .{attempt_count});
     return false;
+}
+
+/// Store successful sync method for window class
+fn storeSuccessfulMethod(class_name: []const u8, mode: SyncMode) void {
+    const owned_class = buffer_allocator.dupe(u8, class_name) catch {
+        debug.debugPrint("Failed to allocate for class name\n", .{});
+        return;
+    };
+
+    window_class_to_mode.put(owned_class, @intFromEnum(mode)) catch {
+        buffer_allocator.free(owned_class);
+        debug.debugPrint("Failed to store class preference\n", .{});
+    };
 }
 
 /// Try a specific sync method with verification
@@ -513,7 +408,8 @@ fn trySyncMethod(mode: SyncMode, content: []const u8) bool {
             success = tryNormalTextFieldUpdate(content);
         },
         .Clipboard => {
-            success = tryClipboardUpdate(content);
+            const focus_hwnd = api.GetFocus() orelse return false;
+            success = text_inject.insertTextAsSelection(focus_hwnd, content);
         },
         .Simulation => {
             success = tryKeySimulation(content);
@@ -536,37 +432,73 @@ fn trySyncMethod(mode: SyncMode, content: []const u8) bool {
 }
 
 /// Verify text update succeeded by reading back from the control
-fn verifyTextUpdate(expected_content: []const u8) bool {
-    const updated_text = text_field_manager.getActiveFieldText() catch |err| {
-        std.debug.print("Failed to get updated text: {}\n", .{err});
+fn verifyTextUpdate(expected: []const u8) bool {
+    // Get the actual text from the control
+    const actual = text_field_manager.getActiveFieldText() catch |err| {
+        debug.debugPrint("Verification failed: couldn't get text from field: {}\n", .{err});
         return false;
     };
-    defer buffer_allocator.free(updated_text);
+    defer buffer_allocator.free(actual);
 
-    // Special case: If we're expecting empty text, any very short text is ok
-    if (expected_content.len == 0 and updated_text.len < 3) {
-        return true;
-    }
+    // Different verification strategies depending on text length
+    if (expected.len < 50) {
+        // For short texts, expect exact match
+        const matches = std.mem.eql(u8, expected, actual);
+        if (!matches) {
+            debug.debugPrint("Short text verification failed:\n  Expected: \"{s}\"\n  Actual: \"{s}\"\n", .{ expected, actual });
+        }
+        return matches;
+    } else {
+        // For longer texts, use more sophisticated verification
 
-    // Compare updated text with what we expected - allow partial matches
-    // since some applications format input or add content
-    if (updated_text.len >= expected_content.len) {
-        // Check if updated_text contains our content
-        if (std.mem.indexOf(u8, updated_text, expected_content) != null) {
+        // 1. Check if expected is fully contained in actual
+        if (std.mem.indexOf(u8, actual, expected) != null) {
             return true;
         }
-    } else if (expected_content.len > 0 and updated_text.len > 0) {
-        // Or if our content contains the updated text
-        if (std.mem.indexOf(u8, expected_content, updated_text) != null) {
+
+        // 2. Check first 50 chars as they're most likely to be visible
+        const prefix_len = @min(expected.len, 50);
+        const actual_prefix = if (actual.len >= prefix_len) actual[0..prefix_len] else actual;
+        const expected_prefix = expected[0..prefix_len];
+
+        if (std.mem.eql(u8, expected_prefix, actual_prefix)) {
+            debug.debugPrint("Prefix match but full text differs\n", .{});
             return true;
         }
-    }
 
-    return false;
+        // 3. Calculate similarity as a percentage of matching characters
+        var matching_chars: usize = 0;
+        const compare_len = @min(expected.len, actual.len);
+
+        for (0..compare_len) |i| {
+            if (expected[i] == actual[i]) {
+                matching_chars += 1;
+            }
+        }
+
+        const similarity = @as(f32, @floatFromInt(matching_chars)) /
+            @as(f32, @floatFromInt(compare_len)) * 100.0;
+
+        // Accept if 85% or more characters match
+        const high_similarity = similarity >= 85.0;
+
+        if (!high_similarity) {
+            debug.debugPrint("Long text verification failed: {d:.1}% similar\n", .{similarity});
+
+            // Log the beginning of both strings for debugging
+            const log_len = @min(@min(actual.len, expected.len), 100);
+            debug.debugPrint("  Expected starts with: \"{s}\"\n  Actual starts with: \"{s}\"\n", .{ expected[0..log_len], actual[0..log_len] });
+        }
+
+        return high_similarity;
+    }
 }
 
 /// Cleanup resources
 pub fn deinit() void {
+    buffer_manager.deinit();
+    text_field_manager.deinit();
+
     if (last_known_text.len > 0) {
         buffer_allocator.free(last_known_text);
     }

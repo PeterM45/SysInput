@@ -6,6 +6,7 @@ const buffer = sysinput.core.buffer;
 const buffer_controller = sysinput.buffer_controller;
 const suggestion_handler = sysinput.suggestion_handler;
 const win32 = sysinput.win32.hook;
+const debug = sysinput.core.debug;
 
 /// General Purpose Allocator for dynamic memory
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -25,27 +26,29 @@ pub fn main() !void {
     try suggestion_handler.init(allocator, hInstance);
     defer suggestion_handler.deinit();
 
-    std.debug.print("Starting SysInput...\n", .{});
+    debug.debugPrint("Starting SysInput...\n", .{});
 
     // Set up the keyboard hook
     keyboard.g_hook = try keyboard.setupKeyboardHook();
-    std.debug.print("Keyboard hook installed successfully.\n", .{});
+    debug.debugPrint("Keyboard hook installed successfully.\n", .{});
 
     // Initial text field detection
     buffer_controller.detectActiveTextField();
 
-    std.debug.print("Press ESC key to exit.\n", .{});
+    debug.debugPrint("Press ESC key to exit.\n", .{});
 
     // Clean up when the application exits
     defer {
         if (keyboard.g_hook) |hook| {
             _ = win32.UnhookWindowsHookEx(hook);
-            std.debug.print("Keyboard hook removed.\n", .{});
+            debug.debugPrint("Keyboard hook removed.\n", .{});
         }
     }
 
     // Run the message loop to keep the hook active
-    try keyboard.messageLoop();
+    keyboard.messageLoop() catch |err| {
+        std.debug.print("Message loop error: {}\n", .{err});
+    };
 }
 
 test "basic buffer operations" {

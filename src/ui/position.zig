@@ -2,6 +2,7 @@ const std = @import("std");
 const sysinput = @import("../sysinput.zig");
 
 const api = sysinput.win32.api;
+const debug = sysinput.core.debug;
 
 /// Get the position of the text caret or active window
 pub fn getCaretPosition() api.POINT {
@@ -30,7 +31,7 @@ pub fn getCaretPosition() api.POINT {
 
             // Convert from client coordinates to screen coordinates
             if (api.ClientToScreen(gui_info.hwndCaret.?, &pt) != 0) {
-                std.debug.print("Using exact caret position: {}, {}\n", .{ pt.x, pt.y });
+                debug.debugPrint("Using exact caret position: {}, {}\n", .{ pt.x, pt.y });
                 return pt;
             }
         }
@@ -47,7 +48,7 @@ pub fn getCaretPosition() api.POINT {
             pt.y = @intCast(@as(i32, @intFromFloat(@as(f32, @floatFromInt((pos_u64 >> 16) & 0xFFFF)))));
 
             if (api.ClientToScreen(focus_hwnd.?, &pt) != 0) {
-                std.debug.print("Using EM_POSFROMCHAR position: {}, {}\n", .{ pt.x, pt.y });
+                debug.debugPrint("Using EM_POSFROMCHAR position: {}, {}\n", .{ pt.x, pt.y });
                 return pt;
             }
         }
@@ -58,11 +59,11 @@ pub fn getCaretPosition() api.POINT {
     if (foreground_hwnd == null) {
         // Last resort: use cursor position
         _ = api.GetCursorPos(&pt);
-        std.debug.print("No foreground window, using cursor position\n", .{});
+        debug.debugPrint("No foreground window, using cursor position\n", .{});
         return pt;
     }
 
-    std.debug.print("Found foreground window at 0x{x}\n", .{@intFromPtr(foreground_hwnd.?)});
+    debug.debugPrint("Found foreground window at 0x{x}\n", .{@intFromPtr(foreground_hwnd.?)});
 
     // First approach: Try to use cursor position if it's inside the window
     var cursor_pos: api.POINT = undefined;
@@ -79,7 +80,7 @@ pub fn getCaretPosition() api.POINT {
                 // Position below cursor
                 pt.x = cursor_pos.x;
                 pt.y = cursor_pos.y + 20;
-                std.debug.print("Using cursor position inside window: {}, {}\n", .{ pt.x, pt.y });
+                debug.debugPrint("Using cursor position inside window: {}, {}\n", .{ pt.x, pt.y });
                 return pt;
             }
         }
@@ -93,7 +94,7 @@ pub fn getCaretPosition() api.POINT {
             // Position at the bottom of the control
             pt.x = control_rect.left + 10;
             pt.y = control_rect.bottom + 5;
-            std.debug.print("Using Edit control position: {}, {}\n", .{ pt.x, pt.y });
+            debug.debugPrint("Using Edit control position: {}, {}\n", .{ pt.x, pt.y });
             return pt;
         }
     }
@@ -104,14 +105,14 @@ pub fn getCaretPosition() api.POINT {
         // Position in the middle-left of the window
         pt.x = window_rect.left + 100;
         pt.y = window_rect.top + @divTrunc(window_rect.bottom - window_rect.top, 2);
-        std.debug.print("Using window position: {}, {}\n", .{ pt.x, pt.y });
+        debug.debugPrint("Using window position: {}, {}\n", .{ pt.x, pt.y });
         return pt;
     }
 
     // Last resort: fixed position on screen
     pt.x = 100;
     pt.y = 100;
-    std.debug.print("Using fixed fallback position\n", .{});
+    debug.debugPrint("Using fixed fallback position\n", .{});
     return pt;
 }
 

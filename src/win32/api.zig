@@ -366,9 +366,6 @@ pub extern "user32" fn DefWindowProcA(
     lParam: LPARAM,
 ) callconv(.C) LRESULT;
 
-// Window state and relationships
-pub extern "user32" fn GetForegroundWindow() callconv(.C) ?HWND;
-pub extern "user32" fn GetFocus() callconv(.C) ?HWND;
 pub extern "user32" fn GetActiveWindow() callconv(.C) ?HWND;
 pub extern "user32" fn GetParent(hWnd: HWND) callconv(.C) ?HWND;
 pub extern "user32" fn SetForegroundWindow(hWnd: HWND) callconv(.C) BOOL;
@@ -380,20 +377,12 @@ pub extern "user32" fn FindWindowExA(
     lpszWindow: ?[*:0]const u8,
 ) callconv(.C) ?HWND;
 
-// Window messages
-pub extern "user32" fn SendMessageA(
-    hWnd: HWND,
-    Msg: UINT,
-    wParam: WPARAM,
-    lParam: LPARAM,
-) callconv(.C) LRESULT;
+pub extern "user32" fn GetForegroundWindow() callconv(.C) ?HWND;
+pub extern "user32" fn GetClassNameA(hWnd: ?HWND, lpClassName: [*:0]u8, nMaxCount: c_int) callconv(.C) c_int;
+pub extern "user32" fn GetFocus() callconv(.C) ?HWND;
 
-pub extern "user32" fn PostMessageA(
-    hWnd: HWND,
-    Msg: UINT,
-    wParam: WPARAM,
-    lParam: LPARAM,
-) callconv(.C) BOOL;
+pub extern "user32" fn SendMessageA(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.C) LRESULT;
+pub extern "user32" fn PostMessageA(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.C) BOOL;
 
 //=============================================================================
 // INPUT AND CURSOR FUNCTIONS
@@ -563,4 +552,177 @@ pub extern "kernel32" fn lstrlenA(lpString: ?*const anyopaque) callconv(.C) c_in
 // Helper functions
 pub inline fn makeIntResource(id: u16) [*:0]const u8 {
     return @ptrFromInt(id);
+}
+
+//=============================================================================
+// IDIOMATIC ZIG WRAPPERS
+//=============================================================================
+
+// --- Window Management ---
+
+// Original SafeWrapper functions
+pub fn safeGetClassName(hwnd: ?HWND) ![]const u8 {
+    var class_name: [256]u8 = undefined;
+    const len = GetClassNameA(hwnd, @ptrCast(&class_name), class_name.len);
+    if (len == 0) return error.GetClassNameFailed;
+    return class_name[0..@as(usize, @intCast(len))];
+}
+
+pub fn safeGetFocus() !HWND {
+    return GetFocus() orelse error.NoFocusedWindow;
+}
+
+pub fn safeGetForegroundWindow() !HWND {
+    return GetForegroundWindow() orelse error.NoActiveWindow;
+}
+
+// camelCase API wrappers for common functions
+pub fn getClassName(hwnd: ?HWND, className: [*:0]u8, maxCount: c_int) c_int {
+    return GetClassNameA(hwnd, className, maxCount);
+}
+
+pub fn getFocus() ?HWND {
+    return GetFocus();
+}
+
+pub fn getForegroundWindow() ?HWND {
+    return GetForegroundWindow();
+}
+
+pub fn getActiveWindow() ?HWND {
+    return GetActiveWindow();
+}
+
+pub fn getParent(hwnd: HWND) ?HWND {
+    return GetParent(hwnd);
+}
+
+pub fn clientToScreen(hwnd: HWND, point: *POINT) BOOL {
+    return ClientToScreen(hwnd, point);
+}
+
+pub fn getClientRect(hwnd: HWND, rect: *RECT) BOOL {
+    return GetClientRect(hwnd, rect);
+}
+
+pub fn getWindowRect(hwnd: HWND, rect: *RECT) BOOL {
+    return GetWindowRect(hwnd, rect);
+}
+
+pub fn getCaretPos(point: *POINT) BOOL {
+    return GetCaretPos(point);
+}
+
+pub fn getCursorPos(point: *POINT) BOOL {
+    return GetCursorPos(point);
+}
+
+pub fn setForegroundWindow(hwnd: HWND) BOOL {
+    return SetForegroundWindow(hwnd);
+}
+
+pub fn findWindowEx(parent: ?HWND, childAfter: ?HWND, className: [*:0]const u8, windowName: ?[*:0]const u8) ?HWND {
+    return FindWindowExA(parent, childAfter, className, windowName);
+}
+
+pub fn sendMessage(hwnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) LRESULT {
+    return SendMessageA(hwnd, msg, wParam, lParam);
+}
+
+pub fn postMessage(hwnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) BOOL {
+    return PostMessageA(hwnd, msg, wParam, lParam);
+}
+
+pub fn sendInput(inputCount: UINT, inputs: *const INPUT, inputSize: c_int) UINT {
+    return SendInput(inputCount, inputs, inputSize);
+}
+
+pub fn setWindowPos(hwnd: HWND, insertAfter: ?HWND, x: c_int, y: c_int, cx: c_int, cy: c_int, flags: UINT) BOOL {
+    return SetWindowPos(hwnd, insertAfter, x, y, cx, cy, flags);
+}
+
+pub fn getWindowThreadProcessId(hwnd: HWND, processId: ?*DWORD) DWORD {
+    return GetWindowThreadProcessId(hwnd, processId);
+}
+
+pub fn getGUIThreadInfo(threadId: DWORD, info: *GUITHREADINFO) BOOL {
+    return GetGUIThreadInfo(threadId, info);
+}
+
+// --- Device Context and Drawing ---
+
+pub fn getDC(hwnd: ?HWND) ?HDC {
+    return GetDC(hwnd);
+}
+
+pub fn releaseDC(hwnd: ?HWND, hdc: HDC) c_int {
+    return ReleaseDC(hwnd, hdc);
+}
+
+pub fn beginPaint(hwnd: HWND, paint: *PAINTSTRUCT) HDC {
+    return BeginPaint(hwnd, paint);
+}
+
+pub fn endPaint(hwnd: HWND, paint: *const PAINTSTRUCT) BOOL {
+    return EndPaint(hwnd, paint);
+}
+
+pub fn fillRect(hdc: HDC, rect: *const RECT, brush: HANDLE) c_int {
+    return FillRect(hdc, rect, brush);
+}
+
+pub fn drawText(hdc: HDC, text: [*:0]const u8, textLen: c_int, rect: *RECT, format: UINT) c_int {
+    return DrawTextA(hdc, text, textLen, rect, format);
+}
+
+// --- Clipboard Operations ---
+
+pub fn openClipboard(hwndOwner: ?HWND) BOOL {
+    return OpenClipboard(hwndOwner);
+}
+
+pub fn closeClipboard() BOOL {
+    return CloseClipboard();
+}
+
+pub fn emptyClipboard() BOOL {
+    return EmptyClipboard();
+}
+
+pub fn setClipboardData(format: UINT, mem: ?HANDLE) ?HANDLE {
+    return SetClipboardData(format, mem);
+}
+
+pub fn getClipboardData(format: UINT) ?HANDLE {
+    return GetClipboardData(format);
+}
+
+// --- Memory Operations ---
+
+pub fn globalAlloc(flags: UINT, bytes: usize) ?HANDLE {
+    return GlobalAlloc(flags, bytes);
+}
+
+pub fn globalLock(mem: HANDLE) ?*anyopaque {
+    return GlobalLock(mem);
+}
+
+pub fn globalUnlock(mem: HANDLE) BOOL {
+    return GlobalUnlock(mem);
+}
+
+pub fn globalFree(mem: HANDLE) HANDLE {
+    return GlobalFree(mem);
+}
+
+// --- System Information ---
+
+pub fn getSystemMetrics(index: c_int) c_int {
+    return GetSystemMetrics(index);
+}
+
+// --- Utility Functions ---
+
+pub fn sleep(milliseconds: DWORD) void {
+    return Sleep(milliseconds);
 }

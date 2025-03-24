@@ -106,7 +106,7 @@ pub fn getAutocompleteSuggestions() !void {
     if (std.mem.eql(u8, autocomplete_engine.current_word, last_word_processed) and
         autocomplete_suggestions.items.len > 0)
     {
-        return;
+        return error.NoSuggestionsNeeded;
     }
 
     // Store the current word as the last processed
@@ -190,7 +190,7 @@ pub fn replaceSuggestionWord(current_word: []const u8, suggestion: []const u8) b
     if (focus_hwnd != null) {
         var class_name: [64]u8 = [_]u8{0} ** 64;
         const class_ptr: [*:0]u8 = @ptrCast(&class_name);
-        const class_len = detection.GetClassNameA(focus_hwnd.?, class_ptr, 64);
+        const class_len = api.GetClassNameA(focus_hwnd.?, class_ptr, 64);
 
         var class_slice: []const u8 = "";
         if (class_len > 0) {

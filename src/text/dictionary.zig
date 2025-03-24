@@ -1,4 +1,7 @@
 const std = @import("std");
+const sysinput = @import("../sysinput.zig");
+
+const debug = sysinput.core.debug;
 
 /// Fallback dictionary of common English words in case file loading fails
 /// This is much smaller than a full dictionary but provides basic functionality
@@ -34,18 +37,18 @@ pub const Dictionary = struct {
         var success = false;
         for (dictionary_paths) |path| {
             success = dict.loadFromFile(path) catch |err| {
-                std.debug.print("Error loading dictionary from {s}: {}\n", .{ path, err });
+                debug.debugPrint("Error loading dictionary from {s}: {}\n", .{ path, err });
                 continue;
             };
             if (success) {
-                std.debug.print("Successfully loaded dictionary from {s}\n", .{path});
+                debug.debugPrint("Successfully loaded dictionary from {s}\n", .{path});
                 break;
             }
         }
 
         // If file loading failed, use fallback words
         if (!success) {
-            std.debug.print("Could not find dictionary file, using fallback dictionary\n", .{});
+            debug.debugPrint("Could not find dictionary file, using fallback dictionary\n", .{});
             // Add fallback common words to the dictionary
             for (FALLBACK_WORDS) |word| {
                 try dict.word_map.put(word, {});
@@ -128,7 +131,7 @@ pub const Dictionary = struct {
             word_count += 1;
         }
 
-        std.debug.print("Loaded {d} words from dictionary file\n", .{word_count});
+        debug.debugPrint("Loaded {d} words from dictionary file\n", .{word_count});
         return true;
     }
 

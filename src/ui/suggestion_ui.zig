@@ -5,6 +5,7 @@ const api = sysinput.win32.api;
 const window = sysinput.ui.window;
 const text_inject = sysinput.win32.text_inject;
 const position = sysinput.ui.position;
+const debug = sysinput.core.debug;
 
 /// Inline completion UI manager
 pub const AutocompleteUI = struct {
@@ -118,11 +119,11 @@ pub const AutocompleteUI = struct {
             suggested_pos.y -= @intFromFloat((20.0 + height_f32) * dpi);
         }
 
-        std.debug.print("Showing suggestion UI at {}, {}\n", .{ suggested_pos.x, suggested_pos.y });
+        debug.debugPrint("Showing suggestion UI at {}, {}\n", .{ suggested_pos.x, suggested_pos.y });
 
         // Create window if it doesn't exist
         if (self.suggestion_window == null) {
-            std.debug.print("Creating suggestion window\n", .{});
+            debug.debugPrint("Creating suggestion window\n", .{});
 
             const new_window = api.CreateWindowExA(
                 api.WS_EX_TOPMOST | api.WS_EX_TOOLWINDOW | api.WS_EX_NOACTIVATE,
@@ -140,7 +141,7 @@ pub const AutocompleteUI = struct {
             );
 
             if (new_window == null) {
-                std.debug.print("Failed to create suggestion window\n", .{});
+                debug.debugPrint("Failed to create suggestion window\n", .{});
                 return error.WindowCreationFailed;
             }
 

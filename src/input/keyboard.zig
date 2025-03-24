@@ -13,7 +13,7 @@ pub fn setupKeyboardHook() !win32.HHOOK {
     const hook = win32.SetWindowsHookExA(win32.WH_KEYBOARD_LL, keyboardHookProc, hInstance, 0);
 
     if (hook == null) {
-        std.debug.print("Failed to set keyboard hook\n", .{});
+        debug.debugPrint("Failed to set keyboard hook\n", .{});
         return win32.HookError.SetHookFailed;
     }
 
@@ -44,7 +44,7 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                     kbd.vkCode == win32.VK_RETURN))
             {
                 // Debug output for suggestion navigation
-                std.debug.print("Suggestion navigation key: 0x{X}\n", .{kbd.vkCode});
+                debug.debugPrint("Suggestion navigation key: 0x{X}\n", .{kbd.vkCode});
 
                 // Handle navigation keys for autocomplete
                 switch (kbd.vkCode) {
@@ -59,13 +59,13 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                         return 1; // Prevent default handling
                     },
                     win32.VK_TAB, win32.VK_RIGHT => {
-                        std.debug.print("Accepting current suggestion\n", .{});
+                        debug.debugPrint("Accepting current suggestion\n", .{});
                         // Accept current suggestion
                         suggestion_handler.acceptCurrentSuggestion();
                         return 1; // Prevent default handling
                     },
                     win32.VK_RETURN => {
-                        std.debug.print("Accepting current suggestion with enter\n", .{});
+                        debug.debugPrint("Accepting current suggestion with enter\n", .{});
                         // Accept current suggestion
                         suggestion_handler.acceptCurrentSuggestion();
 
@@ -130,24 +130,30 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
             const is_printable = kbd.vkCode >= 0x20 and kbd.vkCode <= 0x7E;
 
             if (is_control_key or is_printable) {
-                std.debug.print("Key down: 0x{X}\n", .{kbd.vkCode});
+                debug.debugPrint("Key down: 0x{X}\n", .{kbd.vkCode});
 
                 // Exit application on ESC key
                 if (kbd.vkCode == win32.VK_ESCAPE) {
-                    std.debug.print("ESC pressed - exit\n", .{});
+                    debug.debugPrint("ESC pressed - exit\n", .{});
                     std.process.exit(0);
                 }
 
                 // Special key handling for text editing
                 if (kbd.vkCode == win32.VK_BACK) {
                     // Backspace key
-                    buffer_controller.handleBackspace();
+                    buffer_controller.processBackspace() catch |err| {
+                        debug.debugPrint("Backspace error: {}\n", .{err});
+                    };
                 } else if (kbd.vkCode == win32.VK_DELETE) {
                     // Delete key
-                    buffer_controller.handleDelete();
+                    buffer_controller.processDelete() catch |err| {
+                        debug.debugPrint("Delete error: {}\n", .{err});
+                    };
                 } else if (kbd.vkCode == win32.VK_RETURN) {
                     // Enter/Return key
-                    buffer_controller.handleReturn();
+                    buffer_controller.processReturn() catch |err| {
+                        debug.debugPrint("Return error: {}\n", .{err});
+                    };
                 } else if (kbd.vkCode == win32.VK_TAB) {
                     // Tab key might indicate focus change - detect text field
                     buffer_controller.detectActiveTextField();
