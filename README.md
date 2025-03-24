@@ -2,11 +2,11 @@
 
 SysInput is a Windows utility written in Zig that provides system-wide autocomplete and spell checking across all applications. It runs in the background, captures keystrokes via Windows hooks, detects text fields, and shows intelligent suggestions near the text cursor.
 
-<!--
-## Demo
 
-put link to demo here once uploaded to some cdn
--->
+
+## Demo
+![SysInput Demo](https://github.com/user-attachments/assets/95c258c5-f25d-4a10-8337-2f7532c056e5)
+
 
 ## Features
 
