@@ -1,0 +1,72 @@
+name: SysInput CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.14.0
+
+      - name: Cache zig dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            zig-cache
+            ~/.cache/zig
+          key: ${{ runner.os }}-zig-${{ hashFiles('build.zig', 'build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-
+
+      - name: Build
+        run: zig build
+
+      - name: Run tests
+        run: zig build test
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: SysInput-Windows
+          path: |
+            zig-out/bin/SysInput.exe
+            zig-out/bin/resources/
+
+  # Add release job that runs only on release creation
+  release-artifacts:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: windows-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: SysInput-Windows
+          path: SysInput/
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path SysInput/* -DestinationPath SysInput-Windows.zip
+
+      - name: Upload release assets
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: SysInput-Windows.zip
+          asset_name: SysInput-Windows.zip
+          asset_content_type: application/zip
