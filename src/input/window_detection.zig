@@ -19,7 +19,7 @@ pub const KNOWN_CLASSES = [_]WindowClassPreference{
     .{ .class_name = "RichEdit20A", .preferred_method = @intFromEnum(insertion.InsertMethod.DirectMessage) },
     .{ .class_name = "RICHEDIT50W", .preferred_method = @intFromEnum(insertion.InsertMethod.DirectMessage) },
     .{ .class_name = "RICHEDIT60W", .preferred_method = @intFromEnum(insertion.InsertMethod.DirectMessage) },
-    .{ .class_name = "Notepad", .preferred_method = @intFromEnum(insertion.InsertMethod.KeySimulation) },
+    .{ .class_name = "Notepad", .preferred_method = 3 }, // Special value for Notepad
     .{ .class_name = "TextBox", .preferred_method = @intFromEnum(insertion.InsertMethod.Clipboard) },
 };
 

@@ -29,6 +29,9 @@ pub fn tryInsertionMethod(hwnd: api.HWND, current_word: []const u8, suggestion: 
         @intFromEnum(InsertMethod.DirectMessage) => {
             success = tryDirectMessageInsertion(hwnd, current_word, suggestion, allocator);
         },
+        3 => { // Special Notepad method
+            success = trySimpleNotepadInsertion(hwnd, current_word, suggestion, allocator);
+        },
         else => {
             debug.debugPrint("Unknown insertion method: {d}\n", .{method});
             return false;
@@ -39,6 +42,83 @@ pub fn tryInsertionMethod(hwnd: api.HWND, current_word: []const u8, suggestion: 
     debug.debugPrint("Method {d} {s} in {d}ms\n", .{ method, if (success) "succeeded" else "failed", elapsed });
 
     return success;
+}
+
+/// Very simple Notepad-specific insertion that uses SendMessage
+pub fn trySimpleNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion: []const u8, allocator: std.mem.Allocator) bool {
+    debug.debugPrint("Using simplified Notepad insertion for '{s}' -> '{s}'\n", .{ current_word, suggestion });
+
+    // First, try to get the full text content
+    const text_length = api.SendMessageA(hwnd, api.WM_GETTEXTLENGTH, 0, 0);
+    if (text_length <= 0) {
+        return false;
+    }
+
+    // Allocate space for the text (plus null terminator)
+    const buffer_size: usize = @intCast(text_length + 1);
+    const buffer = allocator.allocSentinel(u8, buffer_size, 0) catch {
+        debug.debugPrint("Failed to allocate buffer for Notepad text\n", .{});
+        return false;
+    };
+    defer allocator.free(buffer);
+
+    // Get the text content
+    const get_result = api.SendMessageA(hwnd, api.WM_GETTEXT, @intCast(buffer_size), // Cast buffer_size to WPARAM
+        @bitCast(@intFromPtr(buffer.ptr))); // Use bitCast for pointer to LPARAM
+
+    if (get_result == 0) {
+        debug.debugPrint("Failed to get Notepad text\n", .{});
+        return false;
+    }
+
+    // Make a copy of the text
+    const text_copy = allocator.dupe(u8, buffer[0..@intCast(get_result)]) catch {
+        debug.debugPrint("Failed to duplicate text buffer\n", .{});
+        return false;
+    };
+    defer allocator.free(text_copy);
+
+    // Get current selection
+    const selection = api.SendMessageA(hwnd, api.EM_GETSEL, 0, 0);
+    const sel_u64: u64 = @bitCast(selection);
+    const sel_start: u32 = @truncate(sel_u64 & 0xFFFF);
+    const sel_end: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
+
+    // Create modified text by replacing current_word with suggestion
+    var modified_text = std.ArrayList(u8).init(allocator);
+    defer modified_text.deinit();
+
+    // Add text up to selection point
+    modified_text.appendSlice(text_copy[0..sel_start]) catch return false;
+
+    // Add suggestion
+    modified_text.appendSlice(suggestion) catch return false;
+    modified_text.append(' ') catch return false; // Add a space
+
+    // Add text after current word
+    if (sel_end < text_copy.len) {
+        modified_text.appendSlice(text_copy[sel_end..]) catch return false;
+    }
+
+    // Set full text back to Notepad
+    const modified_ptr = allocator.allocSentinel(u8, modified_text.items.len, 0) catch {
+        return false;
+    };
+    defer allocator.free(modified_ptr);
+
+    @memcpy(modified_ptr, modified_text.items);
+
+    // Set as new text
+    _ = api.SendMessageA(hwnd, api.WM_SETTEXT, 0, @bitCast(@intFromPtr(modified_ptr.ptr))); // Use bitCast for pointer to LPARAM
+
+    // Position cursor after the inserted text + space
+    // Carefully handle the type conversion for EM_SETSEL parameters
+    const new_pos_u32: u32 = sel_start + @as(u32, @intCast(suggestion.len)) + 1;
+    const wp_newpos: api.WPARAM = new_pos_u32;
+    const lp_newpos: api.LPARAM = @intCast(new_pos_u32);
+    _ = api.SendMessageA(hwnd, api.EM_SETSEL, wp_newpos, lp_newpos);
+
+    return true;
 }
 
 /// Try clipboard-based insertion
@@ -255,4 +335,217 @@ pub fn simulateKeyPress(vk: u8, is_down: bool) void {
 pub fn isWordChar(c: u8) bool {
     // Allow letters, numbers, underscore, and apostrophe (for contractions)
     return std.ascii.isAlphanumeric(c) or c == '_' or c == '\'';
+}
+
+/// Special insertion method for Notepad
+pub fn tryNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion: []const u8, allocator: std.mem.Allocator) bool {
+    debug.debugPrint("Using Notepad-specific insertion for '{s}' -> '{s}'\n", .{ current_word, suggestion });
+
+    // Get the current clipboard content to restore later
+    const original_clipboard_text: ?[]u8 = saveClipboardText(allocator);
+    defer {
+        if (original_clipboard_text) |txt| {
+            allocator.free(txt);
+        }
+    }
+
+    // Ensure window is in focus
+    _ = api.SetForegroundWindow(hwnd);
+    api.Sleep(50); // Give Notepad time to focus
+
+    // Step 1: Select text using keyboard shortcut - Shift+Home to select to beginning of line
+    simulateCtrlLeftArrow(); // Move to beginning of word
+    simulateShiftRightArrow(current_word.len); // Select the word
+    api.Sleep(50);
+
+    // Step 2: Set clipboard with suggestion
+    if (!setClipboardText(suggestion)) {
+        debug.debugPrint("Failed to set clipboard text\n", .{});
+        return false;
+    }
+
+    // Step 3: Send paste command (Ctrl+V)
+    simulateCtrlV();
+    api.Sleep(100); // Wait for paste to complete
+
+    // Step 4: Add a space using WM_CHAR
+    _ = api.SendMessageA(hwnd, api.WM_CHAR, ' ', 0);
+    api.Sleep(50);
+
+    // Restore original clipboard if we had saved it
+    if (original_clipboard_text) |orig_text| {
+        _ = setClipboardText(orig_text);
+    }
+
+    // Try to get text to verify and update our buffer
+    buffer_controller.detectActiveTextField();
+
+    return true;
+}
+
+/// Save clipboard text
+fn saveClipboardText(allocator: std.mem.Allocator) ?[]u8 {
+    if (api.OpenClipboard(null) == 0) {
+        return null;
+    }
+
+    const original_handle = api.GetClipboardData(api.CF_TEXT);
+    if (original_handle == null) {
+        _ = api.CloseClipboard();
+        return null;
+    }
+
+    const data_ptr = api.GlobalLock(original_handle.?);
+    if (data_ptr == null) {
+        _ = api.CloseClipboard();
+        return null;
+    }
+
+    const str_len = api.lstrlenA(data_ptr);
+    if (str_len <= 0) {
+        _ = api.GlobalUnlock(original_handle.?);
+        _ = api.CloseClipboard();
+        return null;
+    }
+
+    const u_str_len: usize = @intCast(str_len);
+    const buffer = allocator.alloc(u8, u_str_len + 1) catch {
+        _ = api.GlobalUnlock(original_handle.?);
+        _ = api.CloseClipboard();
+        return null;
+    };
+
+    @memcpy(buffer[0..u_str_len], @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
+    buffer[u_str_len] = 0; // Null terminate
+
+    _ = api.GlobalUnlock(original_handle.?);
+    _ = api.CloseClipboard();
+
+    return buffer[0..u_str_len];
+}
+
+/// Set clipboard text
+fn setClipboardText(text: []const u8) bool {
+    if (api.OpenClipboard(null) == 0) {
+        return false;
+    }
+
+    _ = api.EmptyClipboard();
+
+    const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, text.len + 1);
+    if (handle == null) {
+        _ = api.CloseClipboard();
+        return false;
+    }
+
+    const data_ptr = api.GlobalLock(handle.?);
+    if (data_ptr == null) {
+        _ = api.GlobalFree(handle.?);
+        _ = api.CloseClipboard();
+        return false;
+    }
+
+    @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
+    @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
+
+    _ = api.GlobalUnlock(handle.?);
+
+    const result = api.SetClipboardData(api.CF_TEXT, handle);
+    _ = api.CloseClipboard();
+
+    return result != null;
+}
+
+/// Simulate Ctrl+Left to move to beginning of word
+fn simulateCtrlLeftArrow() void {
+    // Use individual SendInput calls to avoid array issues
+    var input: api.INPUT = undefined;
+
+    // Ctrl down
+    input.type = api.INPUT_KEYBOARD;
+    input.ki.wVk = api.VK_CONTROL;
+    input.ki.wScan = 0;
+    input.ki.dwFlags = 0;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Left down
+    input.ki.wVk = api.VK_LEFT;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Left up
+    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Ctrl up
+    input.ki.wVk = api.VK_CONTROL;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    api.Sleep(20);
+}
+
+/// Simulate Shift+Right Arrow multiple times to select text
+fn simulateShiftRightArrow(count: usize) void {
+    if (count == 0) return;
+
+    var input: api.INPUT = undefined;
+
+    // Shift down
+    input.type = api.INPUT_KEYBOARD;
+    input.ki.wVk = api.VK_SHIFT;
+    input.ki.wScan = 0;
+    input.ki.dwFlags = 0;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Multiple Right presses
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        // Right down
+        input.ki.wVk = api.VK_RIGHT;
+        input.ki.dwFlags = 0;
+        _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+        // Right up
+        input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+        _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+        api.Sleep(5);
+    }
+
+    // Shift up
+    input.ki.wVk = api.VK_SHIFT;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    api.Sleep(20);
+}
+
+/// Simulate Ctrl+V (paste)
+fn simulateCtrlV() void {
+    var input: api.INPUT = undefined;
+
+    // Ctrl down
+    input.type = api.INPUT_KEYBOARD;
+    input.ki.wVk = api.VK_CONTROL;
+    input.ki.wScan = 0;
+    input.ki.dwFlags = 0;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // V down
+    input.ki.wVk = 'V';
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // V up
+    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Ctrl up
+    input.ki.wVk = api.VK_CONTROL;
+    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
+
+    api.Sleep(20);
 }
