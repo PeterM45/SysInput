@@ -3,9 +3,10 @@ const sysinput = @import("root").sysinput;
 
 const dict = sysinput.text.dictionary;
 const edit_distance = sysinput.text.edit_distance;
+const config = sysinput.core.config;
 
 /// Maximum number of suggestions to generate
-const MAX_SUGGESTIONS = 5;
+const MAX_SUGGESTIONS = config.TEXT.MAX_SUGGESTIONS;
 
 /// Spellchecker implementation
 pub const SpellChecker = struct {

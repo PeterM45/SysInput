@@ -6,6 +6,7 @@ const window = sysinput.ui.window;
 const text_inject = sysinput.win32.text_inject;
 const position = sysinput.ui.position;
 const debug = sysinput.core.debug;
+const config = sysinput.core.config;
 
 /// Inline completion UI manager
 pub const AutocompleteUI = struct {
@@ -107,7 +108,7 @@ pub const AutocompleteUI = struct {
         suggested_pos.y += @intFromFloat(@as(f32, 20.0 * dpi));
 
         // Calculate window size based on suggestions
-        const size = position.calculateSuggestionWindowSize(self.suggestions, window.SUGGESTION_FONT_HEIGHT, window.WINDOW_PADDING);
+        const size = position.calculateSuggestionWindowSize(self.suggestions, config.UI.SUGGESTION_FONT_HEIGHT, window.WINDOW_PADDING);
 
         // Adjust for screen boundaries
         const screen_width = api.GetSystemMetrics(api.SM_CXSCREEN);

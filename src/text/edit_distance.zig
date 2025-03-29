@@ -1,7 +1,10 @@
 const std = @import("std");
+const sysinput = @import("root").sysinput;
+
+const config = sysinput.core.config;
 
 /// Maximum edit distance to consider for suggestions
-pub const MAX_EDIT_DISTANCE = 2;
+pub const MAX_EDIT_DISTANCE = config.BEHAVIOR.MAX_EDIT_DISTANCE;
 
 /// A word suggestion with scoring
 pub const Suggestion = struct {

@@ -3,9 +3,10 @@ const sysinput = @import("root").sysinput;
 
 const debug = sysinput.core.debug;
 const insertion = sysinput.text.insertion;
+const config = sysinput.core.config;
 
 /// Maximum text buffer size
-const MAX_BUFFER_SIZE = 4096;
+const MAX_BUFFER_SIZE = config.TEXT.MAX_BUFFER_SIZE;
 
 /// Represents a position in the text buffer
 pub const CursorPosition = struct {

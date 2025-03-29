@@ -3,18 +3,10 @@ const sysinput = @import("root").sysinput;
 
 const api = sysinput.win32.api;
 const debug = sysinput.core.debug;
+const config = sysinput.core.config;
 
 /// Window class for suggestion popup
 pub const SUGGESTION_WINDOW_CLASS = "SysInputSuggestions";
-pub const MAX_SUGGESTION_LEN = 256;
-
-/// Font used for suggestions
-pub const SUGGESTION_FONT_HEIGHT = 16;
-
-/// Background color
-pub const BG_COLOR = 0x00FFFFFF; // White
-pub const SELECTED_BG_COLOR = 0x00B3D9FF; // Light blue
-pub const TEXT_COLOR = 0x00000000; // Black
 
 /// Suggestion window margins
 pub const WINDOW_PADDING = 2;
@@ -46,7 +38,7 @@ pub fn suggestionWindowProc(
 
             // Create a font for the suggestions
             g_ui_state.font = api.CreateFontA(
-                SUGGESTION_FONT_HEIGHT, // height
+                config.UI.SUGGESTION_FONT_HEIGHT, // height
                 0, // width (0 = auto)
                 0, // escapement
                 0, // orientation
@@ -92,7 +84,7 @@ pub fn suggestionWindowProc(
                 // Draw each suggestion
                 var i: usize = 0;
                 var y: i32 = WINDOW_PADDING;
-                const line_height = SUGGESTION_FONT_HEIGHT + 4; // Add some padding
+                const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 4; // Add some padding
 
                 while (i < g_ui_state.suggestions.len) : (i += 1) {
                     const is_selected = g_ui_state.selected_index == @as(i32, @intCast(i));
@@ -108,7 +100,7 @@ pub fn suggestionWindowProc(
 
                     // Draw background for selection
                     if (is_selected) {
-                        const brush = api.CreateSolidBrush(SELECTED_BG_COLOR);
+                        const brush = api.CreateSolidBrush(config.UI.SELECTED_BG_COLOR);
                         if (brush != null) {
                             defer _ = api.DeleteObject(brush.?);
                             _ = api.FillRect(hdc, &rect, brush.?);
@@ -116,10 +108,10 @@ pub fn suggestionWindowProc(
                     }
 
                     // Draw suggestion text
-                    _ = api.SetTextColor(hdc, TEXT_COLOR);
+                    _ = api.SetTextColor(hdc, config.UI.TEXT_COLOR);
 
                     // Convert to wchar if needed or use multibyte version
-                    var buffer: [MAX_SUGGESTION_LEN:0]u8 = undefined;
+                    var buffer: [config.TEXT.MAX_SUGGESTION_LEN:0]u8 = undefined;
                     std.mem.copyForwards(u8, &buffer, suggestion);
                     buffer[suggestion.len] = 0; // Null terminate
 
@@ -139,7 +131,7 @@ pub fn suggestionWindowProc(
             _ = x_pos; // Use the x_pos to avoid unused variable warning
 
             // Calculate which suggestion was clicked
-            const line_height = SUGGESTION_FONT_HEIGHT + 4;
+            const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 4;
             const index = @divTrunc(y - WINDOW_PADDING, line_height);
 
             if (index >= 0 and index < g_ui_state.suggestions.len) {
@@ -165,7 +157,7 @@ pub fn suggestionWindowProc(
             var rect: api.RECT = undefined;
             _ = api.GetClientRect(hwnd, &rect);
 
-            const brush = api.CreateSolidBrush(BG_COLOR);
+            const brush = api.CreateSolidBrush(config.UI.BG_COLOR);
             if (brush != null) {
                 defer _ = api.DeleteObject(brush.?);
                 _ = api.FillRect(hdc, &rect, brush.?);
