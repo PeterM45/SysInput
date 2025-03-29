@@ -36,7 +36,7 @@ pub fn suggestionWindowProc(
         api.WM_CREATE => {
             debug.debugPrint("Suggestion window created\n", .{});
 
-            // Create a font for the suggestions
+            // Create a font for the suggestions - using Segoe UI for modern look
             g_ui_state.font = api.CreateFontA(
                 config.UI.SUGGESTION_FONT_HEIGHT, // height
                 0, // width (0 = auto)
@@ -49,7 +49,7 @@ pub fn suggestionWindowProc(
                 api.ANSI_CHARSET, // charset
                 api.OUT_DEFAULT_PRECIS, // output precision
                 api.CLIP_DEFAULT_PRECIS, // clipping precision
-                api.DEFAULT_QUALITY, // quality
+                api.CLEARTYPE_QUALITY, // quality - use ClearType for crisp text
                 api.DEFAULT_PITCH | api.FF_DONTCARE, // pitch and family
                 "Segoe UI\x00", // face name (null-terminated)
             );
@@ -78,13 +78,14 @@ pub fn suggestionWindowProc(
                     _ = api.SelectObject(hdc, font);
                 }
 
-                // Clear background
+                // Set text settings for better appearance
                 _ = api.SetBkMode(hdc, api.TRANSPARENT);
+                _ = api.SetTextColor(hdc, config.UI.TEXT_COLOR);
 
                 // Draw each suggestion
                 var i: usize = 0;
                 var y: i32 = WINDOW_PADDING;
-                const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 4; // Add some padding
+                const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 8; // More padding
 
                 while (i < g_ui_state.suggestions.len) : (i += 1) {
                     const is_selected = g_ui_state.selected_index == @as(i32, @intCast(i));
@@ -98,23 +99,27 @@ pub fn suggestionWindowProc(
                         .bottom = y + line_height,
                     };
 
-                    // Draw background for selection
+                    // Draw background for selection (simplified to avoid errors)
                     if (is_selected) {
                         const brush = api.CreateSolidBrush(config.UI.SELECTED_BG_COLOR);
                         if (brush != null) {
                             defer _ = api.DeleteObject(brush.?);
                             _ = api.FillRect(hdc, &rect, brush.?);
+
+                            // Use white text for selected item with a constant
+                            _ = api.SetTextColor(hdc, 0x00FFFFFF); // White
                         }
+                    } else {
+                        _ = api.SetTextColor(hdc, config.UI.TEXT_COLOR);
                     }
 
                     // Draw suggestion text
-                    _ = api.SetTextColor(hdc, config.UI.TEXT_COLOR);
-
-                    // Convert to wchar if needed or use multibyte version
                     var buffer: [config.TEXT.MAX_SUGGESTION_LEN:0]u8 = undefined;
                     std.mem.copyForwards(u8, &buffer, suggestion);
                     buffer[suggestion.len] = 0; // Null terminate
 
+                    // Add padding for text
+                    rect.left += 8;
                     _ = api.DrawTextA(hdc, &buffer, @intCast(suggestion.len), &rect, api.DT_LEFT | api.DT_SINGLELINE | api.DT_VCENTER);
 
                     y += line_height;

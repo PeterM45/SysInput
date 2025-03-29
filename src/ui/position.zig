@@ -8,21 +8,48 @@ const debug = sysinput.core.debug;
 pub fn getCaretPosition() api.POINT {
     var pt = api.POINT{ .x = 0, .y = 0 };
 
-    // Try getting actual caret position
+    // First try using GUI thread info which is more reliable
     const focus_hwnd = api.getFocus();
     if (focus_hwnd != null) {
-        // First try to get caret position directly
+        // Get thread ID for the window
+        const thread_id = api.getWindowThreadProcessId(focus_hwnd.?, null);
+
+        // Initialize GUITHREADINFO structure
+        var gui_info = api.GUITHREADINFO{
+            .cbSize = @sizeOf(api.GUITHREADINFO),
+            .flags = 0,
+            .hwndActive = null,
+            .hwndFocus = null,
+            .hwndCapture = null,
+            .hwndMenuOwner = null,
+            .hwndMoveSize = null,
+            .hwndCaret = null,
+            .rcCaret = api.RECT{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+        };
+
+        // Try to get GUI thread info
+        if (api.getGUIThreadInfo(thread_id, &gui_info) != 0) {
+            if (gui_info.hwndCaret != null) {
+                // Use caret rectangle from GUI thread info
+                pt.x = gui_info.rcCaret.left;
+                pt.y = gui_info.rcCaret.bottom; // Use bottom for better positioning
+
+                // Convert to screen coordinates - properly handle the optional
+                _ = api.clientToScreen(gui_info.hwndCaret.?, &pt);
+                debug.debugPrint("Got caret position from GUITHREADINFO: {d},{d}\n", .{ pt.x, pt.y });
+                return applyPositionOffset(pt);
+            }
+        }
+
+        // If GUI thread info failed, try direct caret position
         if (api.getCaretPos(&pt) != 0) {
             // Convert from client to screen coordinates
             _ = api.clientToScreen(focus_hwnd.?, &pt);
             debug.debugPrint("Got caret position directly: {d},{d}\n", .{ pt.x, pt.y });
-
-            // Add slight offset below caret
-            pt.y += 20;
-            return pt;
+            return applyPositionOffset(pt);
         }
 
-        // If that fails, try getting position from selection
+        // Try using EM_POSFROMCHAR as a fallback for Edit controls
         const selection = api.sendMessage(focus_hwnd.?, api.EM_GETSEL, 0, 0);
         const sel_u64: u64 = @bitCast(selection);
         const sel_end: u32 = @truncate((sel_u64 >> 16) & 0xFFFF);
@@ -35,20 +62,23 @@ pub fn getCaretPosition() api.POINT {
             pt.y = @intCast((char_pos >> 16) & 0xFFFF);
             _ = api.clientToScreen(focus_hwnd.?, &pt);
             debug.debugPrint("Got caret position from selection: {d},{d}\n", .{ pt.x, pt.y });
-
-            // Add slight offset below caret
-            pt.y += 20;
-            return pt;
+            return applyPositionOffset(pt);
         }
     }
 
     // Fall back to cursor position if everything else fails
     _ = api.getCursorPos(&pt);
     debug.debugPrint("Falling back to cursor position: {d},{d}\n", .{ pt.x, pt.y });
+    return applyPositionOffset(pt);
+}
 
-    // Add offset to position suggestions below cursor
-    pt.y += 20;
-    return pt;
+fn applyPositionOffset(pt: api.POINT) api.POINT {
+    var result = pt;
+
+    // Simple fixed offset
+    result.y += 20;
+
+    return result;
 }
 
 /// Calculate suggestion window size based on suggestions

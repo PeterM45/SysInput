@@ -107,8 +107,9 @@ pub const AutocompleteUI = struct {
         // Add DPI-aware padding below the caret
         suggested_pos.y += @intFromFloat(@as(f32, 20.0 * dpi));
 
-        // Calculate window size based on suggestions
-        const size = position.calculateSuggestionWindowSize(self.suggestions, config.UI.SUGGESTION_FONT_HEIGHT, window.WINDOW_PADDING);
+        // Calculate window size based on suggestions - use constants directly from the file
+        const size = position.calculateSuggestionWindowSize(self.suggestions, config.UI.SUGGESTION_FONT_HEIGHT, // Use the fully qualified path
+            sysinput.ui.window.WINDOW_PADDING);
 
         // Adjust for screen boundaries
         const screen_width = api.GetSystemMetrics(api.SM_CXSCREEN);
@@ -131,9 +132,9 @@ pub const AutocompleteUI = struct {
 
             const new_window = api.CreateWindowExA(
                 api.WS_EX_TOPMOST | api.WS_EX_TOOLWINDOW | api.WS_EX_NOACTIVATE,
-                window.SUGGESTION_WINDOW_CLASS,
+                sysinput.ui.window.SUGGESTION_WINDOW_CLASS,
                 "Suggestions\x00",
-                api.WS_POPUP | api.WS_BORDER,
+                api.WS_POPUP | api.WS_BORDER, // Keep border for now to avoid layout issues
                 suggested_pos.x,
                 suggested_pos.y,
                 size.width,
@@ -163,7 +164,7 @@ pub const AutocompleteUI = struct {
             );
         }
 
-        // Show the window
+        // Simple show without animation for now
         _ = api.ShowWindow(self.suggestion_window.?, api.SW_SHOWNOACTIVATE);
         _ = api.UpdateWindow(self.suggestion_window.?);
     }

@@ -3,13 +3,15 @@ pub const UI = struct {
     /// Font height for suggestion window
     pub const SUGGESTION_FONT_HEIGHT = 16;
     /// Window padding
-    pub const WINDOW_PADDING = 2;
+    pub const WINDOW_PADDING = 4;
     /// Background color (white)
-    pub const BG_COLOR = 0x00FFFFFF;
+    pub const BG_COLOR = 0x00FAFAFA;
     /// Selected item background color (light blue)
-    pub const SELECTED_BG_COLOR = 0x00B3D9FF;
+    pub const SELECTED_BG_COLOR = 0x002B5DFC;
     /// Text color (black)
-    pub const TEXT_COLOR = 0x00000000;
+    pub const TEXT_COLOR = 0x00303030;
+    /// Selected item text color (white)
+    pub const SELECTED_TEXT_COLOR = 0x00FFFFFF;
 };
 
 /// Text handling configuration

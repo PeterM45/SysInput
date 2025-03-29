@@ -135,6 +135,11 @@ pub const DT_SINGLELINE = 0x00000020;
 pub const DT_VCENTER = 0x00000004;
 pub const TRANSPARENT = 1;
 
+// Drawing constants
+pub const NULL_PEN = 8;
+pub const CLEARTYPE_QUALITY = 5;
+pub const BYTE = u8;
+
 // Font constants
 pub const FW_NORMAL = 400;
 pub const ANSI_CHARSET = 0;
@@ -383,6 +388,23 @@ pub extern "user32" fn GetFocus() callconv(.C) ?HWND;
 
 pub extern "user32" fn SendMessageA(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.C) LRESULT;
 pub extern "user32" fn PostMessageA(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) callconv(.C) BOOL;
+
+pub extern "user32" fn SetLayeredWindowAttributes(
+    hwnd: HWND,
+    crKey: COLORREF,
+    bAlpha: BYTE,
+    dwFlags: DWORD,
+) callconv(.C) BOOL;
+
+pub extern "gdi32" fn RoundRect(
+    hdc: HDC,
+    left: c_int,
+    top: c_int,
+    right: c_int,
+    bottom: c_int,
+    width: c_int,
+    height: c_int,
+) callconv(.C) BOOL;
 
 //=============================================================================
 // INPUT AND CURSOR FUNCTIONS
