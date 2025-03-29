@@ -1,5 +1,5 @@
 const std = @import("std");
-const sysinput = @import("root").sysinput;
+const sysinput = @import("../sysinput.zig");
 
 const debug = sysinput.core.debug;
 const insertion = sysinput.text.insertion;
