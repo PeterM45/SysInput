@@ -8,6 +8,7 @@ const debug = sysinput.core.debug;
 const api = sysinput.win32.api;
 
 pub var g_hook: ?win32.HHOOK = null;
+pub var g_ctrl_pressed: bool = false;
 
 pub fn setupKeyboardHook() !win32.HHOOK {
     const hInstance = win32.GetModuleHandleA(null);
@@ -30,6 +31,17 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
 
     if (nCode == win32.HC_ACTION) {
         const kbd = @as(*win32.KBDLLHOOKSTRUCT, @ptrFromInt(@as(usize, @bitCast(lParam))));
+
+        // Track Ctrl key state for both key down and key up events
+        if (kbd.vkCode == win32.VK_CONTROL) {
+            if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
+                g_ctrl_pressed = true;
+                debug.debugPrint("Ctrl key pressed\n", .{});
+            } else if (wParam == win32.WM_KEYUP or wParam == win32.WM_SYSKEYUP) {
+                g_ctrl_pressed = false;
+                debug.debugPrint("Ctrl key released\n", .{});
+            }
+        }
 
         // Only process keydown events
         if (wParam == win32.WM_KEYDOWN or wParam == win32.WM_SYSKEYDOWN) {
@@ -88,6 +100,32 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                 if (key_consumed) {
                     return 1;
                 }
+            }
+
+            // Special handling for Ctrl+Backspace (whole word deletion)
+            if (kbd.vkCode == win32.VK_BACK and g_ctrl_pressed) {
+                debug.debugPrint("Ctrl+Backspace detected - deleting whole word\n", .{});
+
+                // First, let the application handle the real Ctrl+Backspace
+                // by passing it to the next hook
+                _ = win32.CallNextHookEx(null, nCode, wParam, lParam);
+
+                // Add a small delay to let the OS process the keypress
+                api.sleep(20);
+
+                // Now force detection of the text field to sync our buffer with the new content
+                buffer_controller.detectActiveTextField();
+
+                // After syncing, update autocomplete suggestions
+                const word = buffer_controller.getCurrentWord() catch "";
+                manager.setCurrentWord(word);
+                manager.getAutocompleteSuggestions() catch {};
+
+                // Print current buffer state to verify
+                buffer_controller.printBufferState();
+
+                // Return 0 to allow the key to be processed (we've already called the next hook)
+                return 0;
             }
 
             // Limit processing to printable characters and specific control keys
