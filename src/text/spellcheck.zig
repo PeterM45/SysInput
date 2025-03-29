@@ -1,6 +1,8 @@
 const std = @import("std");
-const dict = @import("dictionary.zig");
-const edit_distance = @import("edit_distance.zig");
+const sysinput = @import("root").sysinput;
+
+const dict = sysinput.text.dictionary;
+const edit_distance = sysinput.text.edit_distance;
 
 /// Maximum number of suggestions to generate
 const MAX_SUGGESTIONS = 5;
@@ -126,7 +128,10 @@ pub const SpellChecker = struct {
             const owned_suggestion = try self.allocator.dupe(u8, suggestion.word);
             errdefer self.allocator.free(owned_suggestion);
 
-            try results.append(owned_suggestion);
+            results.append(owned_suggestion) catch |err| {
+                self.allocator.free(owned_suggestion);
+                return err;
+            };
         }
     }
 };
