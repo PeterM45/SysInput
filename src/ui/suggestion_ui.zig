@@ -76,6 +76,12 @@ pub const AutocompleteUI = struct {
 
             // Show UI suggestion list near cursor position
             try self.showSuggestionUI(x, y);
+
+            // Force a redraw of the window if it already exists
+            if (self.suggestion_window != null) {
+                _ = api.InvalidateRect(self.suggestion_window.?, null, 1);
+                _ = api.UpdateWindow(self.suggestion_window.?);
+            }
         } else {
             self.hideSuggestions();
         }

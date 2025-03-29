@@ -140,6 +140,7 @@ pub fn showSuggestions(current_text: []const u8, current_word: []const u8, x: i3
         hideSuggestions();
     }
 }
+
 /// Update the position of suggestions if visible
 pub fn updateSuggestionPosition() void {
     if (autocomplete_ui_manager.is_visible) {
