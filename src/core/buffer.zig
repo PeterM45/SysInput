@@ -8,14 +8,6 @@ const config = sysinput.core.config;
 /// Maximum text buffer size
 const MAX_BUFFER_SIZE = config.TEXT.MAX_BUFFER_SIZE;
 
-/// Error types for buffer operations
-pub const BufferError = error{
-    BufferFull,
-    NothingToDelete,
-    InvalidPosition,
-    InvalidCharacter,
-};
-
 /// Represents a position in the text buffer
 pub const CursorPosition = struct {
     /// Character offset from the start of the buffer
@@ -24,15 +16,6 @@ pub const CursorPosition = struct {
     line: usize,
     /// Column number (0-based)
     column: usize,
-
-    /// Creates a new cursor position
-    pub fn init() CursorPosition {
-        return .{
-            .offset = 0,
-            .line = 0,
-            .column = 0,
-        };
-    }
 };
 
 /// The main text buffer structure
@@ -66,27 +49,22 @@ pub const TextBuffer = struct {
             .gap_start = 0,
             .gap_end = gap_size,
             .gap_size = gap_size,
-            .cursor = CursorPosition.init(),
+            .cursor = CursorPosition{ .offset = 0, .line = 0, .column = 0 },
             .allocator = allocator,
             .content_dirty = false,
         };
     }
 
-    /// Validate a character for insertion
-    inline fn isValidChar(char: u8) bool {
-        return char != 0 and (char >= 32 or char == '\n' or char == '\r' or char == '\t');
-    }
-
     /// Insert a character at the current cursor position
-    pub fn insertChar(self: *TextBuffer, char: u8) BufferError!void {
+    pub fn insertChar(self: *TextBuffer, char: u8) !void {
         if (self.length >= MAX_BUFFER_SIZE - self.gap_size) {
-            return BufferError.BufferFull;
+            return error.BufferFull;
         }
 
         // Validate character
-        if (!isValidChar(char)) {
+        if (char == 0 or (char < 32 and char != '\n' and char != '\r' and char != '\t')) {
             debug.debugPrint("Ignoring invalid character: 0x{X}\n", .{char});
-            return BufferError.InvalidCharacter;
+            return;
         }
 
         // Insert at gap start
@@ -108,73 +86,16 @@ pub const TextBuffer = struct {
     }
 
     /// Insert a string at the current cursor position
-    pub fn insertString(self: *TextBuffer, str: []const u8) BufferError!void {
-        // Check if there's enough space
-        if (str.len > MAX_BUFFER_SIZE - self.length) {
-            return BufferError.BufferFull;
-        }
-
-        // Bulk insert optimization for long strings
-        if (str.len > 16) {
-            try self.bulkInsert(str);
-        } else {
-            // For shorter strings, do character-by-character insertion
-            for (str) |char| {
-                try self.insertChar(char);
-            }
-        }
-    }
-
-    /// Optimized bulk insertion for longer strings
-    fn bulkInsert(self: *TextBuffer, str: []const u8) BufferError!void {
-        // Make sure there's enough space in the gap
-        if (str.len > self.gap_size) {
-            return BufferError.BufferFull;
-        }
-
-        // Validate characters
+    pub fn insertString(self: *TextBuffer, str: []const u8) !void {
         for (str) |char| {
-            if (!isValidChar(char)) {
-                debug.debugPrint("Invalid character in string: 0x{X}\n", .{char});
-                return BufferError.InvalidCharacter;
-            }
-        }
-
-        // Copy the string into the gap
-        @memcpy(self.content[self.gap_start..][0..str.len], str);
-
-        // Update line and column position
-        var line_delta: usize = 0;
-        var last_newline_pos: usize = 0;
-
-        for (str, 0..) |char, i| {
-            if (char == '\n') {
-                line_delta += 1;
-                last_newline_pos = i;
-            }
-        }
-
-        // Update state
-        self.gap_start += str.len;
-        self.gap_size -= str.len;
-        self.length += str.len;
-        self.content_dirty = true;
-
-        // Update cursor position
-        self.cursor.offset += str.len;
-
-        if (line_delta > 0) {
-            self.cursor.line += line_delta;
-            self.cursor.column = str.len - last_newline_pos - 1;
-        } else {
-            self.cursor.column += str.len;
+            try self.insertChar(char);
         }
     }
 
     /// Delete a character before the cursor position (backspace)
-    pub fn deleteCharBackward(self: *TextBuffer) BufferError!void {
+    pub fn deleteCharBackward(self: *TextBuffer) !void {
         if (self.gap_start == 0 or self.length == 0) {
-            return BufferError.NothingToDelete;
+            return error.NothingToDelete;
         }
 
         // Check if we're deleting a newline
@@ -205,9 +126,9 @@ pub const TextBuffer = struct {
     }
 
     /// Delete a character after the cursor position (delete key)
-    pub fn deleteCharForward(self: *TextBuffer) BufferError!void {
-        if (self.gap_end >= MAX_BUFFER_SIZE or self.length == 0 or self.gap_start >= self.length) {
-            return BufferError.NothingToDelete;
+    pub fn deleteCharForward(self: *TextBuffer) !void {
+        if (self.gap_start >= self.length) {
+            return error.NothingToDelete;
         }
 
         // For gap buffer, we need to check character at gap_end
@@ -292,7 +213,6 @@ pub const TextBuffer = struct {
     }
 
     /// Update the continuous content from the gap buffer
-    /// This should be called whenever we need to access the buffer in a linear way
     fn updateContinuousContent(self: *TextBuffer) void {
         if (!self.content_dirty) return;
 
@@ -365,7 +285,7 @@ pub const TextBuffer = struct {
         self.gap_start = 0;
         self.gap_end = MAX_BUFFER_SIZE / 2;
         self.gap_size = self.gap_end - self.gap_start;
-        self.cursor = CursorPosition.init();
+        self.cursor = CursorPosition{ .offset = 0, .line = 0, .column = 0 };
         self.content_dirty = true;
     }
 };
@@ -433,10 +353,5 @@ pub const BufferManager = struct {
     pub fn resetBuffer(self: *BufferManager) void {
         self.active_buffer.clear();
         self.changed = false;
-    }
-
-    /// Deinitialize resources (currently no-op but prepared for future use)
-    pub fn deinit(self: *BufferManager) void {
-        _ = self;
     }
 };

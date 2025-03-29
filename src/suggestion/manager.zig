@@ -448,6 +448,9 @@ pub fn acceptCurrentSuggestion() void {
         sysinput.suggestion.stats.recordInsertionSuccess(&stats_instance);
         sysinput.suggestion.stats.recordSuggestionAccepted(&stats_instance);
         sysinput.suggestion.stats.recordMethodSuccess(&stats_instance, method);
+
+        // Resync the buffer
+        resyncBufferWithTextField();
     } else {
         debug.debugPrint("All text replacement methods failed\n", .{});
     }

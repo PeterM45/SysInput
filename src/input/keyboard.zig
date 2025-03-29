@@ -5,6 +5,7 @@ const win32 = sysinput.win32.hook;
 const buffer_controller = sysinput.buffer_controller;
 const manager = sysinput.suggestion.manager;
 const debug = sysinput.core.debug;
+const api = sysinput.win32.api;
 
 pub var g_hook: ?win32.HHOOK = null;
 
@@ -144,6 +145,17 @@ fn keyboardHookProc(nCode: c_int, wParam: win32.WPARAM, lParam: win32.LPARAM) ca
                     buffer_controller.processBackspace() catch |err| {
                         debug.debugPrint("Backspace error: {}\n", .{err});
                     };
+
+                    // Add a small delay to let the backspace take effect
+                    api.sleep(5);
+
+                    // Detect the text field again to ensure sync
+                    buffer_controller.detectActiveTextField();
+
+                    // Update suggestions based on new text state
+                    const word = buffer_controller.getCurrentWord() catch "";
+                    manager.setCurrentWord(word);
+                    manager.getAutocompleteSuggestions() catch {};
                 } else if (kbd.vkCode == win32.VK_DELETE) {
                     // Delete key
                     buffer_controller.processDelete() catch |err| {
