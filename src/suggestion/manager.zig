@@ -439,6 +439,21 @@ pub fn acceptCurrentSuggestion() void {
         // Remember this successful method for this window class
         window_detection.storeSuccessfulMethod(target_hwnd.?, method, gpa_allocator);
 
+        // Wait for the changes to take effect
+        api.sleep(20);
+
+        // Force text field detection
+        buffer_controller.detectActiveTextField();
+
+        // Manually update buffer with suggestion + space
+        buffer_controller.resetBuffer();
+        buffer_controller.insertString(suggestion) catch |err| {
+            debug.debugPrint("Failed to update buffer with suggestion: {}\n", .{err});
+        };
+        buffer_controller.insertString(" ") catch |err| {
+            debug.debugPrint("Failed to add space to buffer: {}\n", .{err});
+        };
+
         // Add to vocabulary
         autocomplete_engine.completeWord(suggestion) catch |err| {
             debug.debugPrint("Error adding to vocabulary: {}\n", .{err});
@@ -448,9 +463,6 @@ pub fn acceptCurrentSuggestion() void {
         sysinput.suggestion.stats.recordInsertionSuccess(&stats_instance);
         sysinput.suggestion.stats.recordSuggestionAccepted(&stats_instance);
         sysinput.suggestion.stats.recordMethodSuccess(&stats_instance, method);
-
-        // Resync the buffer
-        resyncBufferWithTextField();
     } else {
         debug.debugPrint("All text replacement methods failed\n", .{});
     }
