@@ -99,10 +99,10 @@ SysInput/
     │   ├── text_field.zig  - Text field detection
     │   └── window_detection.zig  - Window detection
     ├── main.zig           - Application entry point
+    ├── module_exports.zig    - Main module imports
     ├── suggestion/        - Suggestion handling
     │   ├── manager.zig     - Suggestion manager
     │   └── stats.zig       - Statistics tracking
-    ├── sysinput.zig       - Main module imports
     ├── text/              - Text processing
     │   ├── autocomplete.zig - Autocomplete engine
     │   ├── dictionary.zig   - Dictionary loading/management
