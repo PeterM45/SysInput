@@ -7,7 +7,6 @@ const config = sysinput.core.config;
 
 /// Maximum number of suggestions to generate
 const MAX_SUGGESTIONS = config.TEXT.MAX_SUGGESTIONS;
-var suggestion_pool = sysinput.suggestion.manager.SuggestionPool.init();
 
 /// Autocompletion engine structure
 pub const AutocompleteEngine = struct {
@@ -74,12 +73,6 @@ pub const AutocompleteEngine = struct {
 
     /// Get suggestions based on the current partial word
     pub fn getSuggestions(self: *AutocompleteEngine, results: *std.ArrayList([]const u8)) !void {
-        // Clear existing suggestions
-        for (results.items) |item| {
-            suggestion_pool.freeSuggestion(self.allocator, item);
-        }
-        results.clearRetainingCapacity();
-
         // Don't provide suggestions for very short partial words
         if (self.current_word.len < 1) return;
 
@@ -102,8 +95,10 @@ pub const AutocompleteEngine = struct {
             if (std.mem.startsWith(u8, word, buf[0..self.current_word.len]) and
                 !std.mem.eql(u8, word, buf[0..self.current_word.len]))
             {
-                // Create a copy of the word
+                // Create a copy of the word that WE OWN
                 const owned_suggestion = try self.allocator.dupe(u8, word);
+                errdefer self.allocator.free(owned_suggestion);
+
                 try results.append(owned_suggestion);
 
                 user_words_added += 1;
@@ -119,8 +114,10 @@ pub const AutocompleteEngine = struct {
                 if (std.mem.startsWith(u8, dict_word.*, buf[0..self.current_word.len]) and
                     !std.mem.eql(u8, dict_word.*, buf[0..self.current_word.len]))
                 {
-                    // Create a copy of the word
-                    const owned_suggestion = try suggestion_pool.allocSuggestion(self.allocator, dict_word.*);
+                    // Create a copy of the word that WE OWN
+                    const owned_suggestion = try self.allocator.dupe(u8, dict_word.*);
+                    errdefer self.allocator.free(owned_suggestion);
+
                     try results.append(owned_suggestion);
 
                     if (results.items.len >= MAX_SUGGESTIONS) break;

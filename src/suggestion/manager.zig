@@ -35,48 +35,44 @@ pub var autocomplete_suggestions: std.ArrayList([]const u8) = undefined;
 pub var autocomplete_ui_manager: suggestion_ui.AutocompleteUI = undefined;
 
 /// Last word processed for suggestions
-pub var last_word_processed: []const u8 = "";
+pub var last_word: [256]u8 = undefined;
+pub var last_word_len: usize = 0;
 
-pub const SuggestionPool = struct {
-    // Pre-allocated buffers for suggestions
-    buffers: [config.TEXT.MAX_SUGGESTIONS][config.TEXT.MAX_SUGGESTION_LEN]u8,
-    // Track which buffers are in use
-    in_use: [config.TEXT.MAX_SUGGESTIONS]bool,
+// Replace the clearSuggestions function with this:
+pub fn clearSuggestions() void {
+    // Destroy the entire list and create a new one
+    autocomplete_suggestions.deinit();
+    autocomplete_suggestions = std.ArrayList([]const u8).init(gpa_allocator);
+}
 
-    pub fn init() SuggestionPool {
-        return SuggestionPool{
-            .buffers = undefined,
-            .in_use = [_]bool{false} ** config.TEXT.MAX_SUGGESTIONS,
-        };
+// Update getAutocompleteSuggestions
+pub fn getAutocompleteSuggestions() !void {
+    // Get current word
+    const current_word = autocomplete_engine.current_word;
+
+    // Skip processing if the word hasn't changed
+    if (current_word.len > 0 and current_word.len == last_word_len and
+        std.mem.eql(u8, current_word, last_word[0..last_word_len]) and
+        autocomplete_suggestions.items.len > 0)
+    {
+        return error.NoSuggestionsNeeded;
     }
 
-    pub fn allocSuggestion(self: *SuggestionPool, allocator: std.mem.Allocator, text: []const u8) ![]u8 {
-        // First try to find an available buffer
-        for (self.in_use, 0..) |in_use, i| {
-            if (!in_use and text.len < self.buffers[i].len) {
-                self.in_use[i] = true;
-                @memcpy(self.buffers[i][0..text.len], text);
-                return self.buffers[i][0..text.len];
-            }
-        }
-
-        // Fall back to regular allocation if pool is full
-        return allocator.dupe(u8, text);
+    // Store current word for next comparison
+    if (current_word.len > 0 and current_word.len < last_word.len) {
+        @memcpy(last_word[0..current_word.len], current_word);
+        last_word_len = current_word.len;
+    } else {
+        // Too long or empty
+        last_word_len = 0;
     }
 
-    pub fn freeSuggestion(self: *SuggestionPool, allocator: std.mem.Allocator, text: []const u8) void {
-        // Check if this is one of our pooled buffers
-        for (0..self.buffers.len) |i| {
-            if (@intFromPtr(text.ptr) == @intFromPtr(&self.buffers[i][0])) {
-                self.in_use[i] = false;
-                return;
-            }
-        }
+    // Clear suggestions by recreating the list
+    clearSuggestions();
 
-        // Not from our pool, so free normally
-        allocator.free(text);
-    }
-};
+    // Get new suggestions
+    try autocomplete_engine.getSuggestions(&autocomplete_suggestions);
+}
 
 /// Initialize suggestion handling components
 pub fn init(allocator: std.mem.Allocator, module_instance: anytype) !void {
@@ -110,40 +106,6 @@ pub fn processTextForSuggestions(text: []const u8) !void {
 /// Set current word for autocompletion
 pub fn setCurrentWord(word: []const u8) void {
     autocomplete_engine.setCurrentWord(word);
-}
-
-/// Get autocompletion suggestions
-pub fn getAutocompleteSuggestions() !void {
-    // Skip processing if the word hasn't changed
-    if (std.mem.eql(u8, autocomplete_engine.current_word, last_word_processed) and
-        autocomplete_suggestions.items.len > 0)
-    {
-        return error.NoSuggestionsNeeded;
-    }
-
-    // Store the current word as the last processed
-    const current_word = autocomplete_engine.current_word;
-    if (last_word_processed.len > 0) {
-        gpa_allocator.free(last_word_processed);
-    }
-    if (!std.mem.eql(u8, last_word_processed, current_word)) {
-        const owned_word = try gpa_allocator.dupe(u8, current_word);
-        if (last_word_processed.len > 0) {
-            gpa_allocator.free(last_word_processed);
-        }
-        last_word_processed = owned_word;
-    } else {
-        debug.debugPrint("Reusing existing word - avoided allocation\n", .{});
-    }
-
-    // Clear existing suggestions
-    for (autocomplete_suggestions.items) |item| {
-        gpa_allocator.free(item);
-    }
-    autocomplete_suggestions.clearRetainingCapacity();
-
-    // Get new suggestions
-    try autocomplete_engine.getSuggestions(&autocomplete_suggestions);
 }
 
 /// Check if a word is spelled correctly
@@ -600,19 +562,8 @@ pub fn addWordToVocabulary(word: []const u8) !void {
 /// Deinitialize components
 pub fn deinit() void {
     // Free resources
-    for (suggestions.items) |item| {
-        gpa_allocator.free(item);
-    }
     suggestions.deinit();
-
-    for (autocomplete_suggestions.items) |item| {
-        gpa_allocator.free(item);
-    }
     autocomplete_suggestions.deinit();
-
-    if (last_word_processed.len > 0) {
-        gpa_allocator.free(last_word_processed);
-    }
 
     spell_checker.deinit();
     autocomplete_engine.deinit();
