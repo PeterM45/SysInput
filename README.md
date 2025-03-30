@@ -1,6 +1,6 @@
 # SysInput
 
-SysInput is a Windows utility written in Zig that provides system-wide autocomplete and spell checking across all applications. It runs in the background, captures keystrokes via Windows hooks, detects text fields, and shows intelligent suggestions near the text cursor.
+**SysInput** is a lightweight Windows utility written in [Zig](https://ziglang.org/download/). It provides system-wide autocomplete and spell checking across all applications by capturing keystrokes and displaying suggestions near your cursor.
 
 ## Demo
 
@@ -8,78 +8,53 @@ SysInput is a Windows utility written in Zig that provides system-wide autocompl
 
 ## Features
 
-- **System-wide text suggestions** - Works in any application with standard text fields
-- **Intelligent autocomplete** - Learns from your typing patterns
-- **Spell checking** - Identifies and suggests corrections for misspelled words
-- **Minimal resource usage** - Written in Zig for efficiency and small footprint
-- **Adaptive learning** - Remembers which insertion methods work best for different applications
+- **System-wide suggestions:** Works in any standard text field.
+- **Intelligent autocomplete:** Learns from your typing.
+- **Low resource usage:** Efficiently built in Zig ⚡
+- **Adaptive learning:** Optimizes insertion methods per application
 
 ## Installation
 
 ### Prerequisites
 
 - Windows 10 or 11
-- [Zig 0.14.0](https://ziglang.org/download/) or later
+- [Zig 0.14.0](https://ziglang.org/download/) (or later)
 
 ### Building from Source
 
-1. Clone the repository:
+```bash
+git clone https://github.com/PeterM45/SysInput.git
+cd SysInput
+zig build
+zig build run
+```
 
-   ```
-   git clone https://github.com/PeterM45/SysInput.git
-   cd SysInput
-   ```
-
-2. Build with Zig:
-
-   ```
-   zig build
-   ```
-
-3. Run the application:
-   ```
-   zig build run
-   ```
-
-The application will start running in the background. Type in any text field and press Tab to accept suggestions.
+The application runs in the background. Type in any text field and press **Tab** to see suggestions.
 
 ## Usage
 
-SysInput works automatically in most text fields:
-
-1. Type at least 2 characters in any text field
-2. Suggestions will appear near your cursor
-3. Press Tab or Enter to accept the highlighted suggestion
-4. Use Up/Down arrows to navigate through suggestions
+1. Start typing in any text field (at least 2 characters).
+2. Suggestions appear near your cursor.
+3. Press **Tab** or **Enter** to accept a suggestion.
+4. Use **Up/Down arrows** to navigate suggestions.
 
 ### Keyboard Shortcuts
 
-| Key        | Action                          |
-| ---------- | ------------------------------- |
-| Tab        | Accept current suggestion       |
-| Enter      | Accept current suggestion       |
-| Down Arrow | Navigate to next suggestion     |
-| Up Arrow   | Navigate to previous suggestion |
-| Esc        | Exit SysInput                   |
+| Key         | Action              |
+| ----------- | ------------------- |
+| **Tab**     | Accept suggestion   |
+| **Enter**   | Accept suggestion   |
+| **↓ Arrow** | Next suggestion     |
+| **↑ Arrow** | Previous suggestion |
+| **Esc**     | Exit SysInput       |
 
-## Project Architecture
+## Architecture
 
-SysInput is organized into several modules:
-
-- **Core:** Text buffer implementation, configuration, and debugging utilities
-- **Input:** Keyboard hooks and text field detection
-- **Text:** Autocomplete engine, dictionary management, spell checking, and text insertion
-- **UI:** Suggestion UI, positioning, and window management
-- **Win32:** Windows API bindings and hook implementations
-
-### Key Components
-
-- **Keyboard Hook System:** Captures keystrokes system-wide using Windows hooks
-- **Text Field Detection:** Identifies active text fields across applications
-- **Buffer Management:** Maintains synchronized text content for processing
-- **Suggestion Engine:** Generates completions based on dictionary and user patterns
-- **Text Insertion:** Multiple strategies for reliable text insertion across different applications
-- **UI System:** Lightweight overlay windows for displaying suggestions
+- **Core:** Text buffer, configuration, and debugging.
+- **Input:** Keyboard hooks and text field detection.
+- **Text:** Autocomplete engine, dictionary management, and spell checking.
+- **UI:** Suggestion overlay and window management.
+- **Win32:** Windows API bindings and hook implementations.
 
 ## Project Structure
 
@@ -119,65 +94,32 @@ SysInput/
         └── text_inject.zig - Text injection utilities
 ```
 
-## Text Insertion Methods
-
-SysInput uses multiple strategies to insert text reliably across different applications:
-
-1. **Clipboard Insertion:** Uses clipboard operations to replace text
-2. **Key Simulation:** Simulates keyboard input character by character
-3. **Direct Message Posting:** Sends Windows messages directly to applications
-4. **Application-Specific Methods:** Specialized approaches for specific applications
-
-The system automatically learns which method works best with each application class for optimal reliability.
-
 ## Contributing
 
-Contributions are welcome! Here's how you can help:
+Contributions are welcome! To get started:
 
-### Getting Started
+1. Fork the repository.
+2. Clone your fork.
+3. Create a branch for your changes.
+4. Submit a pull request.
 
-1. Fork the repository
-2. Clone your fork
-3. Create a branch for your changes
-4. Make your changes
-5. Submit a pull request
-
-### Coding Style
-
-- Use Zig's native style with 4 spaces for indentation
-- Follow Zig's naming conventions
-- Add meaningful comments, especially for complex algorithms
-- Include error handling for all operations that may fail
-
-### Areas That Need Help
-
-- Expanded application compatibility
-- Performance optimizations
-- Suggestion popup location improvements
-- Multi-monitor support
-- Customization options
-- Internationalization/multi-language support
+Check out our contribution guidelines for more details.
 
 ## Troubleshooting
 
-### Suggestions Not Appearing
+**No suggestions?**
 
-- Ensure SysInput is running
-- Try typing in a different application
-- Make sure you've typed at least 2 characters
-- Check if the text field is a standard Windows control
+- Ensure SysInput is running.
+- Type in a standard text field (minimum 2 characters).
 
-### Text Insertion Issues
+**Text insertion issues?**
 
-- Try a different insertion method
-- Some applications with security restrictions may limit text automation
-- Custom controls in specialized applications may not be fully compatible
-
-## Acknowledgments
-
-- Thanks to the Zig community for their excellent language and tools
-- Inspired by autocomplete features from various text editors and IDEs
+- Try a different insertion method; some applications may have restrictions.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
+
+---
+
+Feel free to tweak as needed. Happy coding! 👍
