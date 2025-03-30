@@ -1,19 +1,20 @@
 const std = @import("std");
+const config = @import("config.zig");
 
-// Compile-time flag for debug mode
-pub const DEBUG_MODE = true;
+// Use config for debug mode flag
+pub const DEBUG_MODE = config.DEBUG.DEBUG_MODE;
 
 /// Debug level enum to control verbosity
-pub const DebugLevel = enum {
-    Error, // Only critical errors
-    Warning, // Errors and warnings
-    Info, // General information
-    Debug, // Detailed debug info
-    Trace, // Very verbose output
+pub const DebugLevel = enum(u8) {
+    Error = 1, // Only critical errors
+    Warning = 2, // Errors and warnings
+    Info = 3, // General information
+    Debug = 4, // Detailed debug info
+    Trace = 5, // Very verbose output
 };
 
-/// Current debug level - change this to control output verbosity
-pub const CURRENT_LEVEL = DebugLevel.Debug;
+/// Current debug level - use config value
+pub const CURRENT_LEVEL = @as(DebugLevel, @enumFromInt(config.DEBUG.DEBUG_LEVEL));
 
 /// Conditionally print debug message only when DEBUG_MODE is true
 pub fn debugPrint(comptime fmt: []const u8, args: anytype) void {
@@ -45,4 +46,29 @@ pub fn log(
 
     // Print with module context
     std.debug.print(level_prefix ++ "[{s}] " ++ fmt, .{module} ++ args);
+}
+
+// Special logging functions that check config flags
+pub fn logCaretPosition(fmt: []const u8, args: anytype) void {
+    if (DEBUG_MODE and config.DEBUG.LOG_CARET_POSITIONS) {
+        std.debug.print("[CARET] " ++ fmt, args);
+    }
+}
+
+pub fn logBufferChange(fmt: []const u8, args: anytype) void {
+    if (DEBUG_MODE and config.DEBUG.LOG_BUFFER_CHANGES) {
+        std.debug.print("[BUFFER] " ++ fmt, args);
+    }
+}
+
+pub fn logSuggestion(fmt: []const u8, args: anytype) void {
+    if (DEBUG_MODE and config.DEBUG.LOG_SUGGESTIONS) {
+        std.debug.print("[SUGGESTION] " ++ fmt, args);
+    }
+}
+
+pub fn logInsertion(fmt: []const u8, args: anytype) void {
+    if (DEBUG_MODE and config.DEBUG.LOG_INSERTION_METHODS) {
+        std.debug.print("[INSERTION] " ++ fmt, args);
+    }
 }

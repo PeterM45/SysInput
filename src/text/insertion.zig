@@ -131,7 +131,7 @@ pub fn tryClipboardInsertion(hwnd: api.HWND, current_word: []const u8, suggestio
         return false;
     }
 
-    // Use clipboard insertion from text_inject
+    // Use clipboard insertion from text_inject with the renamed function
     if (!text_inject.insertViaClipboard(hwnd, suggestion)) {
         debug.debugPrint("Clipboard insertion failed\n", .{});
         return false;

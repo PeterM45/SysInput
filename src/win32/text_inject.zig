@@ -3,6 +3,7 @@ const sysinput = @import("root").sysinput;
 
 const api = sysinput.win32.api;
 const debug = sysinput.core.debug;
+const config = sysinput.core.config;
 
 /// Insert text as a selected block using multiple approaches
 /// Returns true if successful
@@ -22,7 +23,7 @@ pub fn insertTextAsSelection(hwnd: api.HWND, text: []const u8) bool {
     }
 
     // Approach 2: Try clipboard-based approach
-    if (tryClipboardInsertion(hwnd, text)) {
+    if (clipboardCopyPasteText(hwnd, text)) {
         debug.debugPrint("Clipboard insertion succeeded\n", .{});
         return true;
     }
@@ -84,7 +85,7 @@ fn tryDirectInsertion(hwnd: api.HWND, text: []const u8) bool {
 }
 
 /// Try clipboard-based insertion
-fn tryClipboardInsertion(hwnd: api.HWND, text: []const u8) bool {
+fn clipboardCopyPasteText(hwnd: api.HWND, text: []const u8) bool {
     // Save original clipboard contents
     var original_clipboard_text: ?[]u8 = null;
     defer {
@@ -173,8 +174,8 @@ fn trySimulatedTyping(hwnd: api.HWND, text: []const u8) bool {
     // Bring window to front to ensure it receives input
     _ = api.SetForegroundWindow(hwnd);
 
-    // Give the window time to process
-    api.Sleep(50);
+    // Give the window time to process with config value
+    api.Sleep(config.PERFORMANCE.TEXT_INSERTION_DELAY_MS);
 
     // Send each character as a key press
     for (text) |c| {
@@ -182,7 +183,7 @@ fn trySimulatedTyping(hwnd: api.HWND, text: []const u8) bool {
         _ = api.SendMessageA(hwnd, api.WM_CHAR, @as(api.WPARAM, c), 0);
 
         // Small delay between keystrokes for reliability
-        api.Sleep(5);
+        api.Sleep(config.PERFORMANCE.KEY_PROCESSING_DELAY_MS);
     }
 
     return true;
@@ -361,7 +362,7 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
 
     // Send paste command to the window with retry logic
     var paste_attempts: u8 = 0;
-    const max_paste_attempts: u8 = 3;
+    const max_paste_attempts: u8 = config.PERFORMANCE.MAX_INSERTION_RETRIES;
 
     // Make multiple paste attempts with small delays
     while (paste_attempts < max_paste_attempts) : (paste_attempts += 1) {
@@ -369,7 +370,7 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
         _ = api.sendMessage(target, api.WM_PASTE, 0, 0);
 
         // Wait to give paste time to complete
-        api.sleep(50 * (paste_attempts + 1));
+        api.sleep(config.PERFORMANCE.INSERTION_RETRY_DELAY_MS * (paste_attempts + 1));
 
         // Try to verify paste success (basic verification)
         if (paste_attempts == 0) {
@@ -387,7 +388,7 @@ pub fn insertViaClipboard(hwnd: ?api.HWND, text: []const u8) bool {
     }
 
     // Wait a bit for paste to complete before restoring clipboard
-    api.sleep(50);
+    api.sleep(config.PERFORMANCE.CLIPBOARD_OPERATION_DELAY_MS);
 
     // Restore original clipboard if we had saved it
     if (original_clipboard_text) |orig_text| {

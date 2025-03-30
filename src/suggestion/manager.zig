@@ -137,15 +137,23 @@ pub fn showSuggestions(current_text: []const u8, current_word: []const u8, x: i3
         }
     }
 
-    if (autocomplete_suggestions.items.len > 0 and current_word.len >= 2) {
-        // Set context
-        autocomplete_ui_manager.setTextContext(current_text, current_word);
+    // Use config for minimum word length to show suggestions
+    if (autocomplete_suggestions.items.len > 0 and
+        current_word.len >= config.BEHAVIOR.MIN_TRIGGER_LEN)
+    {
+        // Only show suggestions if auto-show is enabled
+        if (config.BEHAVIOR.AUTO_SHOW_SUGGESTIONS) {
+            // Set context
+            autocomplete_ui_manager.setTextContext(current_text, current_word);
 
-        // Show suggestions at the specified position
-        try autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, x, y);
+            // Show suggestions at the specified position
+            try autocomplete_ui_manager.showSuggestions(autocomplete_suggestions.items, x, y);
 
-        // Update stats
-        sysinput.suggestion.stats.recordSuggestionShown(&stats_instance);
+            // Update stats
+            if (config.STATS.COLLECT_STATS) {
+                sysinput.suggestion.stats.recordSuggestionShown(&stats_instance);
+            }
+        }
     } else {
         debug.debugPrint("No suggestions to show (word len: {d})\n", .{current_word.len});
         hideSuggestions();
@@ -423,7 +431,9 @@ pub fn acceptCurrentSuggestion() void {
     var success = false;
 
     // Record insertion attempt
-    sysinput.suggestion.stats.recordInsertionAttempt(&stats_instance);
+    if (config.STATS.COLLECT_STATS) {
+        sysinput.suggestion.stats.recordInsertionAttempt(&stats_instance);
+    }
     const start_time = std.time.milliTimestamp();
 
     // Try the preferred method first
@@ -452,36 +462,46 @@ pub fn acceptCurrentSuggestion() void {
         window_detection.storeSuccessfulMethod(target_hwnd.?, method, gpa_allocator);
 
         // Wait for the changes to take effect
-        api.sleep(20);
+        api.sleep(config.PERFORMANCE.TEXT_INSERTION_DELAY_MS);
 
         // Force text field detection
         buffer_controller.detectActiveTextField();
 
-        // Manually update buffer with suggestion + space
+        // Manually update buffer with suggestion + space if configured
         buffer_controller.resetBuffer();
         buffer_controller.insertString(suggestion) catch |err| {
             debug.debugPrint("Failed to update buffer with suggestion: {}\n", .{err});
         };
-        buffer_controller.insertString(" ") catch |err| {
-            debug.debugPrint("Failed to add space to buffer: {}\n", .{err});
-        };
 
-        // Add to vocabulary
-        autocomplete_engine.completeWord(suggestion) catch |err| {
-            debug.debugPrint("Error adding to vocabulary: {}\n", .{err});
-        };
+        // Add space if configured
+        if (config.BEHAVIOR.INSERT_SPACE_AFTER_COMPLETION) {
+            buffer_controller.insertString(" ") catch |err| {
+                debug.debugPrint("Failed to add space to buffer: {}\n", .{err});
+            };
+        }
 
-        // Update stats
-        sysinput.suggestion.stats.recordInsertionSuccess(&stats_instance);
-        sysinput.suggestion.stats.recordSuggestionAccepted(&stats_instance);
-        sysinput.suggestion.stats.recordMethodSuccess(&stats_instance, method);
+        // Add to vocabulary if learning is enabled
+        if (config.BEHAVIOR.LEARN_FROM_ACCEPTED) {
+            autocomplete_engine.completeWord(suggestion) catch |err| {
+                debug.debugPrint("Error adding to vocabulary: {}\n", .{err});
+            };
+        }
+
+        // Update stats if enabled
+        if (config.STATS.COLLECT_STATS) {
+            sysinput.suggestion.stats.recordInsertionSuccess(&stats_instance);
+            sysinput.suggestion.stats.recordSuggestionAccepted(&stats_instance);
+            sysinput.suggestion.stats.recordMethodSuccess(&stats_instance, method);
+        }
     } else {
         debug.debugPrint("All text replacement methods failed\n", .{});
     }
 
-    // Record timing
-    const elapsed = std.time.milliTimestamp() - start_time;
-    sysinput.suggestion.stats.recordInsertionTime(&stats_instance, @intCast(elapsed));
+    // Record timing if stats enabled
+    if (config.STATS.COLLECT_STATS) {
+        const elapsed = std.time.milliTimestamp() - start_time;
+        sysinput.suggestion.stats.recordInsertionTime(&stats_instance, @intCast(elapsed));
+    }
 
     // Hide suggestions UI regardless of success
     hideSuggestions();

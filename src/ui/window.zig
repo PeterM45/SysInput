@@ -42,16 +42,16 @@ pub fn suggestionWindowProc(
                 0, // width (0 = auto)
                 0, // escapement
                 0, // orientation
-                api.FW_NORMAL, // weight
+                config.WIN32.FONT_WEIGHT_NORMAL, // weight
                 0, // italic
                 0, // underline
                 0, // strikeout
-                api.ANSI_CHARSET, // charset
+                config.WIN32.FONT_CHARSET, // charset
                 api.OUT_DEFAULT_PRECIS, // output precision
                 api.CLIP_DEFAULT_PRECIS, // clipping precision
-                api.CLEARTYPE_QUALITY, // quality - use ClearType for crisp text
+                config.WIN32.FONT_QUALITY, // quality
                 api.DEFAULT_PITCH | api.FF_DONTCARE, // pitch and family
-                "Segoe UI\x00", // face name (null-terminated)
+                config.UI.FONT_FACE, // face name
             );
 
             if (g_ui_state.font == null) {
@@ -85,7 +85,8 @@ pub fn suggestionWindowProc(
                 // Draw each suggestion
                 var i: usize = 0;
                 var y: i32 = WINDOW_PADDING;
-                const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 8; // More padding
+                const line_height = config.UI.SUGGESTION_FONT_HEIGHT +
+                    @as(i32, @intFromFloat(@as(f32, @floatFromInt(config.UI.SUGGESTION_FONT_HEIGHT)) * (config.UI.LINE_HEIGHT_RATIO - 1.0)));
 
                 while (i < g_ui_state.suggestions.len) : (i += 1) {
                     const is_selected = g_ui_state.selected_index == @as(i32, @intCast(i));
@@ -106,8 +107,8 @@ pub fn suggestionWindowProc(
                             defer _ = api.DeleteObject(brush.?);
                             _ = api.FillRect(hdc, &rect, brush.?);
 
-                            // Use white text for selected item with a constant
-                            _ = api.SetTextColor(hdc, 0x00FFFFFF); // White
+                            // Use selected text color
+                            _ = api.SetTextColor(hdc, config.UI.SELECTED_TEXT_COLOR);
                         }
                     } else {
                         _ = api.SetTextColor(hdc, config.UI.TEXT_COLOR);
@@ -136,7 +137,9 @@ pub fn suggestionWindowProc(
             _ = x_pos; // Use the x_pos to avoid unused variable warning
 
             // Calculate which suggestion was clicked
-            const line_height = config.UI.SUGGESTION_FONT_HEIGHT + 4;
+            const line_height = config.UI.SUGGESTION_FONT_HEIGHT +
+                @as(i32, @intFromFloat(@as(f32, @floatFromInt(config.UI.SUGGESTION_FONT_HEIGHT)) * (config.UI.LINE_HEIGHT_RATIO - 1.0)));
+
             const index = @divTrunc(y - WINDOW_PADDING, line_height);
 
             if (index >= 0 and index < g_ui_state.suggestions.len) {
@@ -186,14 +189,14 @@ pub fn suggestionWindowProc(
 pub fn registerSuggestionWindowClass(instance: api.HINSTANCE) !api.ATOM {
     const wc = api.WNDCLASSEX{
         .cbSize = @sizeOf(api.WNDCLASSEX),
-        .style = api.CS_DROPSHADOW,
+        .style = config.WIN32.SUGGESTION_CLASS_STYLE, // Use config value
         .lpfnWndProc = suggestionWindowProc,
         .cbClsExtra = 0,
         .cbWndExtra = 0,
         .hInstance = instance,
         .hIcon = null,
         .hCursor = api.LoadCursorA(null, api.makeIntResource(api.IDC_ARROW)),
-        .hbrBackground = @as(*anyopaque, @ptrCast(api.GetStockObject(api.WHITE_BRUSH).?)), // Use stock white brush
+        .hbrBackground = @as(*anyopaque, @ptrCast(api.GetStockObject(api.WHITE_BRUSH).?)),
         .lpszMenuName = null,
         .lpszClassName = SUGGESTION_WINDOW_CLASS,
         .hIconSm = null,

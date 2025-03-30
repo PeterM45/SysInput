@@ -137,10 +137,10 @@ pub const AutocompleteUI = struct {
             debug.debugPrint("Creating suggestion window\n", .{});
 
             const new_window = api.CreateWindowExA(
-                api.WS_EX_TOPMOST | api.WS_EX_TOOLWINDOW | api.WS_EX_NOACTIVATE,
+                config.WIN32.SUGGESTION_WINDOW_EX_STYLE,
                 sysinput.ui.window.SUGGESTION_WINDOW_CLASS,
                 "Suggestions\x00",
-                api.WS_POPUP | api.WS_BORDER, // Keep border for now to avoid layout issues
+                config.WIN32.SUGGESTION_WINDOW_STYLE,
                 suggested_pos.x,
                 suggested_pos.y,
                 size.width,
