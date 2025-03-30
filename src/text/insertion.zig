@@ -3,7 +3,7 @@ const sysinput = @import("root").sysinput;
 const api = sysinput.win32.api;
 const debug = sysinput.core.debug;
 const text_inject = sysinput.win32.text_inject;
-const buffer_controller = sysinput.buffer_controller;
+const buffer_controller = sysinput.core.buffer_controller;
 
 /// Text insertion method type
 pub const InsertMethod = enum(u8) {

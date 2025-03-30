@@ -3,7 +3,7 @@ const sysinput = @import("root").sysinput;
 
 const api = sysinput.win32.api;
 const debug = sysinput.core.debug;
-const buffer_controller = sysinput.buffer_controller;
+const buffer_controller = sysinput.core.buffer_controller;
 const insertion = sysinput.text.insertion;
 
 /// Known window classes and their preferred insertion methods

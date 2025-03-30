@@ -2,6 +2,7 @@ pub const core = struct {
     pub const buffer = @import("core/buffer.zig");
     pub const config = @import("core/config.zig");
     pub const debug = @import("core/debug.zig");
+    pub const buffer_controller = @import("core/buffer_controller.zig");
 };
 
 pub const input = struct {
@@ -36,4 +37,4 @@ pub const win32 = struct {
 };
 
 // Root-level modules
-pub const buffer_controller = @import("buffer_controller.zig");
+pub const buffer_controller = @import("core/buffer_controller.zig");

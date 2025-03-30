@@ -1,5 +1,5 @@
 const std = @import("std");
-const sysinput = @import("sysinput.zig");
+const sysinput = @import("root").sysinput;
 
 const buffer = sysinput.core.buffer;
 const api = sysinput.win32.api;

@@ -2,7 +2,7 @@ const std = @import("std");
 const sysinput = @import("root").sysinput;
 
 const win32 = sysinput.win32.hook;
-const buffer_controller = sysinput.buffer_controller;
+const buffer_controller = sysinput.core.buffer_controller;
 const manager = sysinput.suggestion.manager;
 const debug = sysinput.core.debug;
 const api = sysinput.win32.api;
