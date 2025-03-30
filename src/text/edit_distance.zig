@@ -32,10 +32,45 @@ pub fn enhancedEditDistance(a: []const u8, b: []const u8) usize {
     if (a.len == 0) return b.len;
     if (b.len == 0) return a.len;
 
-    // Skip calculation for strings with very different lengths (optimization)
+    // Early exit for identical strings
+    if (std.mem.eql(u8, a, b)) return 0;
+
+    // More aggressive early termination for very different lengths
     const len_diff = if (a.len > b.len) a.len - b.len else b.len - a.len;
     if (len_diff > MAX_EDIT_DISTANCE) {
-        return len_diff; // Return early as this will exceed our max edit distance
+        return len_diff; // Will exceed max distance, so return early
+    }
+
+    // Quick check: if first and last characters don't match, that's already 2 operations
+    if (a.len > 1 and b.len > 1) {
+        var different_chars: usize = 0;
+        if (a[0] != b[0]) different_chars += 1;
+        if (a[a.len - 1] != b[b.len - 1]) different_chars += 1;
+
+        // If both ends differ and strings are long, we can often skip full calculation
+        if (different_chars == 2 and a.len > 5 and b.len > 5) {
+            // If first 2 chars also differ, this is likely not a close match
+            if (a.len > 2 and b.len > 2 and a[1] != b[1]) {
+                return MAX_EDIT_DISTANCE + 1; // Return a value above our threshold
+            }
+        }
+    }
+
+    // If first two characters don't match and words are long enough,
+    // that's another signal they might be quite different
+    if (a.len > 1 and b.len > 1 and a[0] != b[0] and a[1] != b[1]) {
+        // Count additional differences in the first 4 chars
+        var initial_diff_count: usize = 0;
+        const check_len = @min(4, @min(a.len, b.len));
+
+        for (0..check_len) |i| {
+            if (a[i] != b[i]) initial_diff_count += 1;
+        }
+
+        // If we have 3+ differences in the first 4 chars, likely exceeds threshold
+        if (initial_diff_count > 2 and a.len > 5 and b.len > 5) {
+            return MAX_EDIT_DISTANCE + 1;
+        }
     }
 
     // Efficiently calculate using dynamic programming

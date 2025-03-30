@@ -32,6 +32,8 @@ var sync_attempt_count: u8 = 0;
 /// Map to remember which sync mode works best with each window class
 pub var window_class_to_mode: std.StringHashMap(u8) = undefined; // No initial init
 
+var last_content_hash: u64 = 0;
+
 pub fn init(allocator: std.mem.Allocator) !void {
     buffer_allocator = allocator;
     buffer_manager = buffer.BufferManager.init(allocator);
@@ -76,6 +78,14 @@ pub fn detectActiveTextField() void {
         buffer_manager.resetBuffer();
         buffer_manager.insertString(text) catch |err| {
             debug.debugPrint("Failed to sync buffer with text field: {}\n", .{err});
+            // Recover by inserting a smaller portion if buffer is full
+            if (err == error.BufferFull and text.len > 1024) {
+                debug.debugPrint("Attempting to recover by inserting smaller portion\n", .{});
+                buffer_manager.resetBuffer();
+                buffer_manager.insertString(text[0..1024]) catch |truncate_err| {
+                    debug.debugPrint("Failed even with truncated text: {}\n", .{truncate_err});
+                };
+            }
         };
 
         debug.debugPrint("Synced buffer with text field content: \"{s}\"\n", .{text});
@@ -177,6 +187,20 @@ fn tryKeySimulation(content: []const u8) bool {
 /// Print the current buffer state and process text for autocompletion
 pub fn printBufferState() void {
     const content = buffer_manager.getCurrentText();
+
+    // Calculate hash for current content
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(content);
+    const current_hash = hasher.final();
+
+    // If content hasn't changed (based on hash), skip expensive operations
+    if (current_hash == last_content_hash) {
+        return;
+    }
+
+    // Update hash and continue with normal processing
+    last_content_hash = current_hash;
+
     debug.debugPrint("Buffer: \"", .{});
     printEscaped(content);
     debug.debugPrint("\" (len: {})\n", .{content.len});

@@ -7,6 +7,7 @@ const buffer_controller = sysinput.buffer_controller;
 const manager = sysinput.suggestion.manager;
 const win32 = sysinput.win32.hook;
 const debug = sysinput.core.debug;
+const edit_distance = sysinput.text.edit_distance;
 
 /// General Purpose Allocator for dynamic memory
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -72,4 +73,38 @@ test "basic buffer operations" {
     // Test clear
     test_buffer.resetBuffer();
     try std.testing.expectEqualStrings("", test_buffer.getCurrentText());
+
+    // Test handling special characters
+    try test_buffer.insertString("Line1\nLine2\tTabbed");
+    try std.testing.expectEqualStrings("Line1\nLine2\tTabbed", test_buffer.getCurrentText());
+
+    // Test word extraction
+    const word = try test_buffer.getCurrentWord();
+    try std.testing.expectEqualStrings("Tabbed", word);
+
+    // Test buffer limits
+    const long_text = try allocator.alloc(u8, 4000);
+    defer allocator.free(long_text);
+    @memset(long_text, 'A');
+
+    test_buffer.resetBuffer();
+    try test_buffer.insertString(long_text);
+    try std.testing.expectEqual(long_text.len, test_buffer.getCurrentText().len);
+}
+
+test "edit distance calculation" {
+    // Test basic edit distance calculation
+    try std.testing.expectEqual(@as(usize, 0), edit_distance.enhancedEditDistance("test", "test"));
+    try std.testing.expectEqual(@as(usize, 1), edit_distance.enhancedEditDistance("test", "tent"));
+    try std.testing.expectEqual(@as(usize, 2), edit_distance.enhancedEditDistance("test", "text"));
+
+    // Test with empty strings
+    try std.testing.expectEqual(@as(usize, 4), edit_distance.enhancedEditDistance("test", ""));
+    try std.testing.expectEqual(@as(usize, 4), edit_distance.enhancedEditDistance("", "test"));
+    try std.testing.expectEqual(@as(usize, 0), edit_distance.enhancedEditDistance("", ""));
+
+    // Test similarity scoring
+    const score1 = edit_distance.calculateSuggestionScore("te", "test");
+    const score2 = edit_distance.calculateSuggestionScore("te", "tent");
+    try std.testing.expect(score1 > score2); // "test" should be a better suggestion for "te" than "tent"
 }

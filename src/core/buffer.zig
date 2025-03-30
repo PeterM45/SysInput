@@ -61,10 +61,10 @@ pub const TextBuffer = struct {
             return error.BufferFull;
         }
 
-        // Validate character
-        if (char == 0 or (char < 32 and char != '\n' and char != '\r' and char != '\t')) {
-            debug.debugPrint("Ignoring invalid character: 0x{X}\n", .{char});
-            return;
+        // Validate state before insertion
+        if (self.gap_start >= self.content.len or self.gap_end > self.content.len) {
+            debug.debugPrint("Buffer in invalid state: gap_start={d}, gap_end={d}, buffer_len={d}\n", .{ self.gap_start, self.gap_end, self.content.len });
+            return error.BufferCorruption;
         }
 
         // Insert at gap start
@@ -73,6 +73,13 @@ pub const TextBuffer = struct {
         self.gap_size -= 1;
         self.length += 1;
         self.content_dirty = true;
+
+        // Validate state after insertion
+        if (self.gap_start + self.gap_size != self.gap_end) {
+            debug.debugPrint("Buffer inconsistency after insertion\n", .{});
+            // Correct the inconsistency
+            self.gap_end = self.gap_start + self.gap_size;
+        }
 
         // Update cursor position
         self.cursor.offset += 1;

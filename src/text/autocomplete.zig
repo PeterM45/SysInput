@@ -7,6 +7,7 @@ const config = sysinput.core.config;
 
 /// Maximum number of suggestions to generate
 const MAX_SUGGESTIONS = config.TEXT.MAX_SUGGESTIONS;
+var suggestion_pool = sysinput.suggestion.manager.SuggestionPool.init();
 
 /// Autocompletion engine structure
 pub const AutocompleteEngine = struct {
@@ -73,9 +74,9 @@ pub const AutocompleteEngine = struct {
 
     /// Get suggestions based on the current partial word
     pub fn getSuggestions(self: *AutocompleteEngine, results: *std.ArrayList([]const u8)) !void {
-        // Clear the results list first
+        // Clear existing suggestions
         for (results.items) |item| {
-            self.allocator.free(item);
+            suggestion_pool.freeSuggestion(self.allocator, item);
         }
         results.clearRetainingCapacity();
 
@@ -119,7 +120,7 @@ pub const AutocompleteEngine = struct {
                     !std.mem.eql(u8, dict_word.*, buf[0..self.current_word.len]))
                 {
                     // Create a copy of the word
-                    const owned_suggestion = try self.allocator.dupe(u8, dict_word.*);
+                    const owned_suggestion = try suggestion_pool.allocSuggestion(self.allocator, dict_word.*);
                     try results.append(owned_suggestion);
 
                     if (results.items.len >= MAX_SUGGESTIONS) break;
