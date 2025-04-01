@@ -21,7 +21,6 @@ pub const text = struct {
     pub const dictionary = @import("text/dictionary.zig");
     pub const edit_distance = @import("text/edit_distance.zig");
     pub const spellcheck = @import("text/spellcheck.zig");
-    pub const insertion = @import("text/insertion.zig");
 };
 
 pub const ui = struct {
@@ -30,10 +29,14 @@ pub const ui = struct {
     pub const window = @import("ui/window.zig");
 };
 
-pub const win32 = struct {
-    pub const api = @import("win32/api.zig");
-    pub const hook = @import("win32/hook.zig");
-    pub const text_inject = @import("win32/text_inject.zig");
+pub const win32 = platform.windows;
+pub const platform = struct {
+    pub const windows = struct {
+        pub const api = @import("platform/windows/api.zig");
+        pub const hook = @import("platform/windows/hook.zig");
+        pub const text_inject = @import("platform/windows/text_inject.zig");
+        pub const insertion = @import("platform/windows/insertion.zig");
+    };
 };
 
 // Root-level modules

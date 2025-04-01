@@ -2,7 +2,7 @@ const std = @import("std");
 const sysinput = @import("root").sysinput;
 
 const dict = sysinput.text.dictionary;
-const insertion = sysinput.text.insertion;
+const insertion = sysinput.win32.insertion;
 const config = sysinput.core.config;
 const debug = sysinput.core.debug;
 

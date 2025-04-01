@@ -5,14 +5,32 @@ const debug = sysinput.core.debug;
 const text_inject = sysinput.win32.text_inject;
 const buffer_controller = sysinput.core.buffer_controller;
 
-/// Text insertion method type
+/// Represents different text insertion methods
 pub const InsertMethod = enum(u8) {
     Clipboard = 0,
     KeySimulation = 1,
     DirectMessage = 2,
+    // Special methods
+    SimpleNotepad = 3,
 };
 
-/// Try a specific insertion method
+/// Error types for insertion operations
+pub const InsertionError = error{
+    SelectionFailed,
+    BufferAllocationFailed,
+    TextCopyFailed,
+    InsertionFailed,
+    VerificationFailed,
+};
+
+/// Result of a clipboard operation
+pub const ClipboardResult = struct {
+    success: bool,
+    original_content: ?[]u8,
+};
+
+/// Attempt text insertion using a specific method
+/// Returns whether insertion was successful
 pub fn tryInsertionMethod(hwnd: api.HWND, current_word: []const u8, suggestion: []const u8, method: u8, allocator: std.mem.Allocator) bool {
     debug.debugPrint("Trying insertion method: {d}\n", .{method});
 
@@ -29,7 +47,7 @@ pub fn tryInsertionMethod(hwnd: api.HWND, current_word: []const u8, suggestion: 
         @intFromEnum(InsertMethod.DirectMessage) => {
             success = tryDirectMessageInsertion(hwnd, current_word, suggestion, allocator);
         },
-        3 => { // Special Notepad method
+        @intFromEnum(InsertMethod.SimpleNotepad) => {
             success = trySimpleNotepadInsertion(hwnd, current_word, suggestion, allocator);
         },
         else => {
@@ -44,7 +62,7 @@ pub fn tryInsertionMethod(hwnd: api.HWND, current_word: []const u8, suggestion: 
     return success;
 }
 
-/// Very simple Notepad-specific insertion that uses SendMessage
+/// Simplified Notepad-specific insertion using SendMessage
 pub fn trySimpleNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion: []const u8, allocator: std.mem.Allocator) bool {
     debug.debugPrint("Using simplified Notepad insertion for '{s}' -> '{s}'\n", .{ current_word, suggestion });
 
@@ -109,16 +127,93 @@ pub fn trySimpleNotepadInsertion(hwnd: api.HWND, current_word: []const u8, sugge
     @memcpy(modified_ptr, modified_text.items);
 
     // Set as new text
-    _ = api.SendMessageA(hwnd, api.WM_SETTEXT, 0, @bitCast(@intFromPtr(modified_ptr.ptr))); // Use bitCast for pointer to LPARAM
+    _ = api.SendMessageA(hwnd, api.WM_SETTEXT, 0, @bitCast(@intFromPtr(modified_ptr.ptr)));
 
     // Position cursor after the inserted text + space
-    // Carefully handle the type conversion for EM_SETSEL parameters
     const new_pos_u32: u32 = sel_start + @as(u32, @intCast(suggestion.len)) + 1;
     const wp_newpos: api.WPARAM = new_pos_u32;
     const lp_newpos: api.LPARAM = @intCast(new_pos_u32);
     _ = api.SendMessageA(hwnd, api.EM_SETSEL, wp_newpos, lp_newpos);
 
     return true;
+}
+
+/// Save clipboard text, returning the original content if successful
+fn saveClipboardText(allocator: std.mem.Allocator) !?[]u8 {
+    if (api.OpenClipboard(null) == 0) {
+        return null;
+    }
+    defer _ = api.CloseClipboard();
+
+    const original_handle = api.GetClipboardData(api.CF_TEXT);
+    if (original_handle == null) {
+        return null;
+    }
+
+    const data_ptr = api.GlobalLock(original_handle.?);
+    if (data_ptr == null) {
+        return null;
+    }
+    defer _ = api.GlobalUnlock(original_handle.?);
+
+    const str_len = api.lstrlenA(data_ptr);
+    if (str_len <= 0) {
+        return null;
+    }
+
+    const u_str_len: usize = @intCast(str_len);
+    const buffer = try allocator.alloc(u8, u_str_len + 1);
+
+    @memcpy(buffer[0..u_str_len], @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
+    buffer[u_str_len] = 0; // Null terminate
+
+    return buffer[0..u_str_len];
+}
+
+/// Set clipboard text, returning whether operation was successful
+fn setClipboardText(text: []const u8) bool {
+    if (api.OpenClipboard(null) == 0) {
+        return false;
+    }
+    defer _ = api.CloseClipboard();
+
+    _ = api.EmptyClipboard();
+
+    const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, text.len + 1);
+    if (handle == null) {
+        return false;
+    }
+    errdefer _ = api.GlobalFree(handle.?);
+
+    const data_ptr = api.GlobalLock(handle.?);
+    if (data_ptr == null) {
+        _ = api.GlobalFree(handle.?);
+        return false;
+    }
+
+    @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
+    @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
+
+    _ = api.GlobalUnlock(handle.?);
+
+    const result = api.SetClipboardData(api.CF_TEXT, handle);
+    return result != null;
+}
+
+/// Perform a clipboard operation with proper error handling and restoration
+fn withClipboard(allocator: std.mem.Allocator, operation: *const fn ([]const u8) bool, text: []const u8) !ClipboardResult {
+    var result = ClipboardResult{
+        .success = false,
+        .original_content = null,
+    };
+
+    // Save original clipboard content
+    result.original_content = saveClipboardText(allocator) catch null;
+
+    // Perform the requested operation
+    result.success = operation(text);
+
+    return result;
 }
 
 /// Try clipboard-based insertion
@@ -131,7 +226,7 @@ pub fn tryClipboardInsertion(hwnd: api.HWND, current_word: []const u8, suggestio
         return false;
     }
 
-    // Use clipboard insertion from text_inject with the renamed function
+    // Use clipboard insertion from text_inject
     if (!text_inject.insertViaClipboard(hwnd, suggestion)) {
         debug.debugPrint("Clipboard insertion failed\n", .{});
         return false;
@@ -157,6 +252,73 @@ pub fn tryClipboardInsertion(hwnd: api.HWND, current_word: []const u8, suggestio
 
     // Consider success even if verification fails - text might be in control but not readable
     return true;
+}
+
+/// Key combination definition for input simulation
+pub const KeyCombination = struct {
+    /// Main key code
+    main_key: u8,
+    /// Modifier keys
+    modifiers: struct {
+        ctrl: bool = false,
+        shift: bool = false,
+        alt: bool = false,
+    } = .{},
+};
+
+/// Simulate a key combination (press and release)
+pub fn simulateKeyCombination(combo: KeyCombination) void {
+    var input: api.INPUT = undefined;
+    input.type = api.INPUT_KEYBOARD;
+    input.ki.wScan = 0;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
+
+    // Press modifiers
+    if (combo.modifiers.ctrl) {
+        input.ki.wVk = api.VK_CONTROL;
+        input.ki.dwFlags = 0;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    if (combo.modifiers.shift) {
+        input.ki.wVk = api.VK_SHIFT;
+        input.ki.dwFlags = 0;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    if (combo.modifiers.alt) {
+        input.ki.wVk = api.VK_MENU; // ALT key
+        input.ki.dwFlags = 0;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    // Press main key
+    input.ki.wVk = combo.main_key;
+    input.ki.dwFlags = 0;
+    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Release main key
+    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
+    _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+
+    // Release modifiers in reverse order
+    if (combo.modifiers.alt) {
+        input.ki.wVk = api.VK_MENU;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    if (combo.modifiers.shift) {
+        input.ki.wVk = api.VK_SHIFT;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    if (combo.modifiers.ctrl) {
+        input.ki.wVk = api.VK_CONTROL;
+        _ = api.sendInput(1, &input, @sizeOf(api.INPUT));
+    }
+
+    api.sleep(20); // Small delay for reliability
 }
 
 /// Try key simulation insertion
@@ -342,7 +504,7 @@ pub fn tryNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion:
     debug.debugPrint("Using Notepad-specific insertion for '{s}' -> '{s}'\n", .{ current_word, suggestion });
 
     // Get the current clipboard content to restore later
-    const original_clipboard_text: ?[]u8 = saveClipboardText(allocator);
+    const original_clipboard_text: ?[]u8 = saveClipboardText(allocator) catch null;
     defer {
         if (original_clipboard_text) |txt| {
             allocator.free(txt);
@@ -353,22 +515,32 @@ pub fn tryNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion:
     _ = api.SetForegroundWindow(hwnd);
     api.Sleep(50); // Give Notepad time to focus
 
-    // Step 1: Select text using keyboard shortcut - Shift+Home to select to beginning of line
-    simulateCtrlLeftArrow(); // Move to beginning of word
-    simulateShiftRightArrow(current_word.len); // Select the word
+    // Move to beginning of word and select it
+    simulateKeyCombination(.{ .main_key = api.VK_LEFT, .modifiers = .{ .ctrl = true } });
+
+    // Select the current word
+    const shift_right = KeyCombination{
+        .main_key = api.VK_RIGHT,
+        .modifiers = .{ .shift = true },
+    };
+
+    for (0..current_word.len) |_| {
+        simulateKeyCombination(shift_right);
+    }
+
     api.Sleep(50);
 
-    // Step 2: Set clipboard with suggestion
+    // Set clipboard with suggestion
     if (!setClipboardText(suggestion)) {
         debug.debugPrint("Failed to set clipboard text\n", .{});
         return false;
     }
 
-    // Step 3: Send paste command (Ctrl+V)
-    simulateCtrlV();
+    // Paste suggestion
+    simulateKeyCombination(.{ .main_key = 'V', .modifiers = .{ .ctrl = true } });
     api.Sleep(100); // Wait for paste to complete
 
-    // Step 4: Add a space using WM_CHAR
+    // Add a space using WM_CHAR
     _ = api.SendMessageA(hwnd, api.WM_CHAR, ' ', 0);
     api.Sleep(50);
 
@@ -381,171 +553,4 @@ pub fn tryNotepadInsertion(hwnd: api.HWND, current_word: []const u8, suggestion:
     buffer_controller.detectActiveTextField();
 
     return true;
-}
-
-/// Save clipboard text
-fn saveClipboardText(allocator: std.mem.Allocator) ?[]u8 {
-    if (api.OpenClipboard(null) == 0) {
-        return null;
-    }
-
-    const original_handle = api.GetClipboardData(api.CF_TEXT);
-    if (original_handle == null) {
-        _ = api.CloseClipboard();
-        return null;
-    }
-
-    const data_ptr = api.GlobalLock(original_handle.?);
-    if (data_ptr == null) {
-        _ = api.CloseClipboard();
-        return null;
-    }
-
-    const str_len = api.lstrlenA(data_ptr);
-    if (str_len <= 0) {
-        _ = api.GlobalUnlock(original_handle.?);
-        _ = api.CloseClipboard();
-        return null;
-    }
-
-    const u_str_len: usize = @intCast(str_len);
-    const buffer = allocator.alloc(u8, u_str_len + 1) catch {
-        _ = api.GlobalUnlock(original_handle.?);
-        _ = api.CloseClipboard();
-        return null;
-    };
-
-    @memcpy(buffer[0..u_str_len], @as([*]u8, @ptrCast(data_ptr))[0..u_str_len]);
-    buffer[u_str_len] = 0; // Null terminate
-
-    _ = api.GlobalUnlock(original_handle.?);
-    _ = api.CloseClipboard();
-
-    return buffer[0..u_str_len];
-}
-
-/// Set clipboard text
-fn setClipboardText(text: []const u8) bool {
-    if (api.OpenClipboard(null) == 0) {
-        return false;
-    }
-
-    _ = api.EmptyClipboard();
-
-    const handle = api.GlobalAlloc(api.GMEM_MOVEABLE, text.len + 1);
-    if (handle == null) {
-        _ = api.CloseClipboard();
-        return false;
-    }
-
-    const data_ptr = api.GlobalLock(handle.?);
-    if (data_ptr == null) {
-        _ = api.GlobalFree(handle.?);
-        _ = api.CloseClipboard();
-        return false;
-    }
-
-    @memcpy(@as([*]u8, @ptrCast(data_ptr))[0..text.len], text);
-    @as([*]u8, @ptrCast(data_ptr))[text.len] = 0; // Null terminate
-
-    _ = api.GlobalUnlock(handle.?);
-
-    const result = api.SetClipboardData(api.CF_TEXT, handle);
-    _ = api.CloseClipboard();
-
-    return result != null;
-}
-
-/// Simulate Ctrl+Left to move to beginning of word
-fn simulateCtrlLeftArrow() void {
-    // Use individual SendInput calls to avoid array issues
-    var input: api.INPUT = undefined;
-
-    // Ctrl down
-    input.type = api.INPUT_KEYBOARD;
-    input.ki.wVk = api.VK_CONTROL;
-    input.ki.wScan = 0;
-    input.ki.dwFlags = 0;
-    input.ki.time = 0;
-    input.ki.dwExtraInfo = 0;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // Left down
-    input.ki.wVk = api.VK_LEFT;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // Left up
-    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // Ctrl up
-    input.ki.wVk = api.VK_CONTROL;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    api.Sleep(20);
-}
-
-/// Simulate Shift+Right Arrow multiple times to select text
-fn simulateShiftRightArrow(count: usize) void {
-    if (count == 0) return;
-
-    var input: api.INPUT = undefined;
-
-    // Shift down
-    input.type = api.INPUT_KEYBOARD;
-    input.ki.wVk = api.VK_SHIFT;
-    input.ki.wScan = 0;
-    input.ki.dwFlags = 0;
-    input.ki.time = 0;
-    input.ki.dwExtraInfo = 0;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // Multiple Right presses
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        // Right down
-        input.ki.wVk = api.VK_RIGHT;
-        input.ki.dwFlags = 0;
-        _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-        // Right up
-        input.ki.dwFlags = api.KEYEVENTF_KEYUP;
-        _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-        api.Sleep(5);
-    }
-
-    // Shift up
-    input.ki.wVk = api.VK_SHIFT;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    api.Sleep(20);
-}
-
-/// Simulate Ctrl+V (paste)
-fn simulateCtrlV() void {
-    var input: api.INPUT = undefined;
-
-    // Ctrl down
-    input.type = api.INPUT_KEYBOARD;
-    input.ki.wVk = api.VK_CONTROL;
-    input.ki.wScan = 0;
-    input.ki.dwFlags = 0;
-    input.ki.time = 0;
-    input.ki.dwExtraInfo = 0;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // V down
-    input.ki.wVk = 'V';
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // V up
-    input.ki.dwFlags = api.KEYEVENTF_KEYUP;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    // Ctrl up
-    input.ki.wVk = api.VK_CONTROL;
-    _ = api.SendInput(1, &input, @sizeOf(api.INPUT));
-
-    api.Sleep(20);
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const sysinput = @import("module_exports.zig");
+pub const sysinput = @import("exports.zig");
 
 const keyboard = sysinput.input.keyboard;
 const buffer = sysinput.core.buffer;

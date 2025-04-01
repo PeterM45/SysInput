@@ -2,7 +2,7 @@ const std = @import("std");
 const sysinput = @import("root").sysinput;
 
 const debug = sysinput.core.debug;
-const insertion = sysinput.text.insertion;
+const insertion = sysinput.win32.insertion;
 const config = sysinput.core.config;
 
 /// Maximum text buffer size
